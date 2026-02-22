@@ -342,6 +342,56 @@ export function commitTrackerDataFromPriorMessage(currentMessageIndex) {
 }
 
 /**
+ * Populates a message's current swipe slot with tracker data inherited from the
+ * nearest prior assistant message, when no tracker data has been generated for
+ * this swipe yet (e.g. auto-update is disabled).
+ *
+ * This ensures that commitTrackerDataFromPriorMessage can always find a tracker
+ * state to commit when the user sends the next message, rather than nulling
+ * everything out and resetting the tracker display to empty.
+ *
+ * Does nothing if the current swipe already has its own tracker data.
+ *
+ * @param {Object} message - The assistant message object to inherit into
+ * @param {number} messageIndex - Index of that message in chat
+ * @returns {boolean} True if inheritance was written, false otherwise
+ */
+export function inheritSwipeDataFromPriorMessage(message, messageIndex) {
+    const chat = getContext().chat;
+    if (!chat) return false;
+
+    const currentSwipeId = message.swipe_id || 0;
+
+    // Don't overwrite if this swipe already has its own tracker data.
+    if (getSwipeData(message, currentSwipeId)) return false;
+
+    // Walk backward to find the nearest prior assistant message with swipe data.
+    for (let i = messageIndex - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (msg.is_user || msg.is_system) continue;
+
+        const swipeId = msg.swipe_id || 0;
+        const swipeData = getSwipeData(msg, swipeId);
+        if (!swipeData) return false; // Prior assistant also has no data — nothing to inherit
+
+        // Write inherited data into this swipe slot.
+        if (!message.extra) message.extra = {};
+        if (!message.extra.rpg_companion_swipes) message.extra.rpg_companion_swipes = {};
+
+        const inherited = {
+            userStats: swipeData.userStats,
+            infoBox: swipeData.infoBox,
+            characterThoughts: swipeData.characterThoughts
+        };
+        message.extra.rpg_companion_swipes[currentSwipeId] = inherited;
+        mirrorToSwipeInfo(message, currentSwipeId, inherited);
+        // console.log('[RPG Companion] Inherited tracker data from chat[' + i + '] into current swipe slot', currentSwipeId);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Loads RPG data from the current chat's metadata.
  * Automatically migrates v1 inventory to v2 format if needed.
  */

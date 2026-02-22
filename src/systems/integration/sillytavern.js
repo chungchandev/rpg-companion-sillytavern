@@ -24,7 +24,7 @@ import {
     getSeparateGenerationId,
     incrementSeparateGenerationId
 } from '../../core/state.js';
-import { saveChatData, loadChatData, autoSwitchPresetForEntity, getSwipeData, commitTrackerDataFromPriorMessage, mirrorToSwipeInfo } from '../../core/persistence.js';
+import { saveChatData, loadChatData, autoSwitchPresetForEntity, getSwipeData, commitTrackerDataFromPriorMessage, inheritSwipeDataFromPriorMessage, mirrorToSwipeInfo } from '../../core/persistence.js';
 import { i18n } from '../../core/i18n.js';
 
 // Generation & Parsing
@@ -301,6 +301,13 @@ export async function onMessageReceived(data) {
             if (foundSpotifyUrl && extensionSettings.enableSpotifyMusic) {
                 // Just render the music player
                 renderMusicPlayer($musicPlayerContainer[0]);
+            }
+
+            // When auto-update is disabled,no tracker API call will run for this message. 
+            // Inherit the prior assistant message's tracker data into this swipe slot so that 
+            // commitTrackerDataFromPriorMessage can find a valid state next turn instead of nulling everything
+            if (!extensionSettings.autoUpdate || !isAwaitingNewMessage) {
+                inheritSwipeDataFromPriorMessage(lastMessage, chat.length - 1);
             }
         }
 
