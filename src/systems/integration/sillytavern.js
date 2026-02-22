@@ -429,6 +429,88 @@ export function onMessageSwiped(messageIndex) {
 }
 
 /**
+ * Event handler for when a message is deleted.
+ * Re-syncs lastGeneratedData, committedTrackerData, and all UI panels to the
+ * new last assistant message's active swipe — or clears everything if no
+ * assistant messages remain.
+ */
+export function onMessageDeleted() {
+    if (!extensionSettings.enabled) return;
+
+    // console.log('[RPG Companion] 🗑️ EVENT: onMessageDeleted');
+
+    const currentChat = getContext().chat;
+
+    // Walk backward to find the new last assistant message.
+    let lastAssistantIndex = -1;
+    for (let i = currentChat.length - 1; i >= 0; i--) {
+        if (!currentChat[i].is_user && !currentChat[i].is_system) {
+            lastAssistantIndex = i;
+            break;
+        }
+    }
+
+    if (lastAssistantIndex === -1) {
+        // No assistant messages remain — clear all state.
+        lastGeneratedData.userStats = null;
+        lastGeneratedData.infoBox = null;
+        lastGeneratedData.characterThoughts = null;
+        committedTrackerData.userStats = null;
+        committedTrackerData.infoBox = null;
+        committedTrackerData.characterThoughts = null;
+        // console.log('[RPG Companion] 🗑️ No assistant messages remain — cleared all tracker state.');
+    } else {
+        const message = currentChat[lastAssistantIndex];
+        const swipeId = message.swipe_id || 0;
+        const swipeData = getSwipeData(message, swipeId);
+
+        if (swipeData) {
+            // Restore display state from the new tail message's active swipe.
+            lastGeneratedData.userStats = swipeData.userStats || null;
+            lastGeneratedData.infoBox = swipeData.infoBox || null;
+            // Normalise characterThoughts to string (backward compat with old object format).
+            if (swipeData.characterThoughts && typeof swipeData.characterThoughts === 'object') {
+                lastGeneratedData.characterThoughts = JSON.stringify(swipeData.characterThoughts, null, 2);
+            } else {
+                lastGeneratedData.characterThoughts = swipeData.characterThoughts || null;
+            }
+
+            // Sync stat bars.
+            if (swipeData.userStats) {
+                parseUserStats(swipeData.userStats);
+            }
+
+            // console.log('[RPG Companion] 🗑️ Restored display state from assistant message at index', lastAssistantIndex, 'swipe', swipeId);
+        } else {
+            // No swipe data for this message — clear display state.
+            lastGeneratedData.userStats = null;
+            lastGeneratedData.infoBox = null;
+            lastGeneratedData.characterThoughts = null;
+            // console.log('[RPG Companion] 🗑️ No swipe data for last assistant message — cleared display state.');
+        }
+
+        // Commit context from the message *before* the new tail assistant message,
+        // so any subsequent generation uses the correct N-1 world state.
+        commitTrackerDataFromPriorMessage(lastAssistantIndex);
+    }
+
+    // Re-render all panels.
+    renderUserStats();
+    renderInfoBox();
+    renderThoughts();
+    renderInventory();
+    renderQuests();
+    renderMusicPlayer($musicPlayerContainer[0]);
+
+    // Update widget strips.
+    updateFabWidgets();
+    updateStripWidgets();
+
+    // Persist updated state.
+    saveChatData();
+}
+
+/**
  * Update the persona avatar image when user switches personas
  */
 export function updatePersonaAvatar() {
