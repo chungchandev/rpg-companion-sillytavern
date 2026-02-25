@@ -105,7 +105,7 @@ export function commitTrackerData() {
     // Find the last assistant message
     for (let i = chat.length - 1; i >= 0; i--) {
         const message = chat[i];
-        if (!message.is_user) {
+        if (!message.is_user && !message.is_system) {
             // Found last assistant message - commit its tracker data
             const swipeId = message.swipe_id || 0;
             const swipeData = getSwipeData(message, swipeId);
