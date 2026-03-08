@@ -20,7 +20,7 @@ import {
     setLastActionWasSwipe,
     $musicPlayerContainer
 } from '../../core/state.js';
-import { saveChatData } from '../../core/persistence.js';
+import { saveChatData, setMessageSwipeTrackerData } from '../../core/persistence.js';
 import {
     generateSeparateUpdatePrompt
 } from './promptBuilder.js';
@@ -317,11 +317,11 @@ export async function updateRPGData(renderUserStats, renderInfoBox, renderThough
                 }
 
                 const currentSwipeId = lastMessage.swipe_id || 0;
-                lastMessage.extra.rpg_companion_swipes[currentSwipeId] = {
+                setMessageSwipeTrackerData(lastMessage, currentSwipeId, {
                     userStats: parsedData.userStats,
                     infoBox: parsedData.infoBox,
                     characterThoughts: parsedData.characterThoughts
-                };
+                });
 
                 // console.log('[RPG Companion] Stored separate mode RPG data for message swipe', currentSwipeId);
             }

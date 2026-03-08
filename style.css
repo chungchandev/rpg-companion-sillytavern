@@ -11677,3 +11677,66 @@ body:has(.rpg-panel[data-theme="light"]) .rpg-strip-widget {
         min-width: 2.5rem !important;
     }
 }
+
+.rpg-inline-thoughts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    margin: 0.2em 0 0.35em;
+}
+
+.rpg-inline-thought {
+    margin: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-left: 2px solid rgba(255, 120, 140, 0.6);
+    border-radius: 0.5em;
+    background: rgba(255, 255, 255, 0.03);
+    overflow: hidden;
+}
+
+.rpg-inline-thought[open] {
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.rpg-inline-thought-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+    padding: 0.45em 0.7em;
+    cursor: pointer;
+    list-style: none;
+    font-weight: 600;
+    color: var(--SmartThemeBodyColor);
+}
+
+.rpg-inline-thought-summary:hover {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.rpg-inline-thought-summary::-webkit-details-marker {
+    display: none;
+}
+
+.rpg-inline-thought-icon {
+    opacity: 0.9;
+    flex: 0 0 auto;
+}
+
+.rpg-inline-thought-name {
+    line-height: 1.2;
+}
+
+.rpg-inline-thought-content {
+    padding: 0 0.7em 0.65em;
+}
+
+.rpg-inline-thought-text {
+    margin: 0;
+    padding: 0.6em 0.75em;
+    border-radius: 0.4em;
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--SmartThemeBodyColor);
+    font-style: italic;
+    line-height: 1.45;
+}
+

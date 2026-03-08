@@ -150,7 +150,10 @@ import {
     onMessageSent,
     onMessageReceived,
     onCharacterChanged,
+    onChatLoaded,
+    onMessageDeleted,
     onMessageSwiped,
+    scheduleChatStateRehydration,
     updatePersonaAvatar,
     clearExtensionPrompts,
     onGenerationEnded,
@@ -229,6 +232,7 @@ async function addExtensionSettings() {
             // Enabling extension - initialize UI
             await initUI();
             loadChatData(); // Load chat data for current chat
+            scheduleChatStateRehydration();
             updateChatThoughts(); // Create thought bubbles if data exists
             injectCheckpointButton(); // Re-add checkpoint buttons
             updateAllCheckpointIndicators(); // Update button states
@@ -363,6 +367,12 @@ async function initUI() {
     $('#rpg-toggle-thoughts-in-chat').on('change', function() {
         extensionSettings.showThoughtsInChat = $(this).prop('checked');
         // console.log('[RPG Companion] Toggle showThoughtsInChat changed to:', extensionSettings.showThoughtsInChat);
+        saveSettings();
+        updateChatThoughts();
+    });
+
+    $('#rpg-toggle-inline-thoughts').on('change', function() {
+        extensionSettings.thoughtsInChatStyle = $(this).prop('checked') ? 'inline' : 'corner';
         saveSettings();
         updateChatThoughts();
     });
@@ -1047,6 +1057,7 @@ async function initUI() {
     $('#rpg-toggle-quests').prop('checked', extensionSettings.showQuests);
     $('#rpg-toggle-lock-icons').prop('checked', extensionSettings.showLockIcons ?? true);
     $('#rpg-toggle-thoughts-in-chat').prop('checked', extensionSettings.showThoughtsInChat);
+    $('#rpg-toggle-inline-thoughts').prop('checked', (extensionSettings.thoughtsInChatStyle || 'corner') === 'inline');
     $('#rpg-toggle-html-prompt').prop('checked', extensionSettings.enableHtmlPrompt);
     $('#rpg-toggle-dialogue-coloring').prop('checked', extensionSettings.enableDialogueColoring);
     $('#rpg-toggle-deception').prop('checked', extensionSettings.enableDeceptionSystem ?? false);
@@ -1283,6 +1294,7 @@ jQuery(async () => {
         // Load chat-specific data for current chat
         try {
             loadChatData();
+            scheduleChatStateRehydration();
             // Initialize FAB widgets and strip widgets with any loaded data
             updateFabWidgets();
             updateStripWidgets();
@@ -1353,6 +1365,9 @@ jQuery(async () => {
                 [event_types.GENERATION_STOPPED]: onGenerationEnded,
                 [event_types.GENERATION_ENDED]: onGenerationEnded,
                 [event_types.CHAT_CHANGED]: [onCharacterChanged, updatePersonaAvatar, restoreCheckpointOnLoad, clearSessionAvatarPrompts],
+                [event_types.CHAT_LOADED]: onChatLoaded,
+                [event_types.MESSAGE_DELETED]: onMessageDeleted,
+                [event_types.MESSAGE_SWIPE_DELETED]: onMessageDeleted,
                 [event_types.MESSAGE_SWIPED]: onMessageSwiped,
                 [event_types.USER_MESSAGE_RENDERED]: updatePersonaAvatar,
                 [event_types.SETTINGS_UPDATED]: updatePersonaAvatar

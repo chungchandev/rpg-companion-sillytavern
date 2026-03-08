@@ -4,7 +4,7 @@
  */
 
 import { getContext } from '../../../../../../extensions.js';
-import { chat, user_avatar, setExtensionPrompt, extension_prompt_types, saveChatDebounced } from '../../../../../../../script.js';
+import { chat, chat_metadata, user_avatar, setExtensionPrompt, extension_prompt_types } from '../../../../../../../script.js';
 
 // Core modules
 import {
@@ -22,7 +22,7 @@ import {
     updateCommittedTrackerData,
     $musicPlayerContainer
 } from '../../core/state.js';
-import { saveChatData, loadChatData, autoSwitchPresetForEntity } from '../../core/persistence.js';
+import { saveChatData, loadChatData, autoSwitchPresetForEntity, getMessageSwipeTrackerData, getCurrentMessageSwipeTrackerData, restoreLatestTrackerStateFromChat, setMessageSwipeTrackerData } from '../../core/persistence.js';
 import { i18n } from '../../core/i18n.js';
 
 // Generation & Parsing
@@ -50,6 +50,8 @@ import { updateStripWidgets } from '../ui/desktop.js';
 // Chapter checkpoint
 import { updateAllCheckpointIndicators } from '../ui/checkpointUI.js';
 import { restoreCheckpointOnLoad } from '../features/chapterCheckpoint.js';
+
+let chatStateRehydrateRunId = 0;
 
 /**
  * Commits the tracker data from the last assistant message to be used as source for next generation.
@@ -85,6 +87,237 @@ export function commitTrackerData() {
             break;
         }
     }
+}
+
+function getSwipeTrackerData(message) {
+    return getMessageSwipeTrackerData(message);
+}
+
+function getCurrentSwipeTrackerData(message) {
+    return getCurrentMessageSwipeTrackerData(message);
+}
+
+function hasAssistantMessageBody() {
+    const $messages = $('#chat .mes');
+
+    for (let i = $messages.length - 1; i >= 0; i--) {
+        const $message = $messages.eq(i);
+        if ($message.attr('is_user') === 'true') continue;
+        if ($message.find('.mes_text').length > 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function hasAnyTrackerStateInChat() {
+    const chatMessages = getContext()?.chat || [];
+
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+        const swipeData = getSwipeTrackerData(chatMessages[i]);
+        if (swipeData?.userStats || swipeData?.infoBox || swipeData?.characterThoughts) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function hasAssistantMessagesInChat() {
+    const chatMessages = getContext()?.chat || [];
+    return chatMessages.some(message => message && !message.is_user && !message.is_system);
+}
+
+function hasPotentialTrackerSourceInChat() {
+    const chatMessages = getContext()?.chat || [];
+
+    for (const message of chatMessages) {
+        if (!message || message.is_user || message.is_system) {
+            continue;
+        }
+
+        if (message.extra?.rpg_companion_swipes) {
+            return true;
+        }
+
+        if (Array.isArray(message.swipe_info) && message.swipe_info.some(info => info?.extra?.rpg_companion_swipes)) {
+            return true;
+        }
+
+        if (Array.isArray(message.swipes) && message.swipes.length > 1) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function maybeRehydrateUserStatsFromDisplayData() {
+    const hasSavedUserStats = !!chat_metadata?.rpg_companion?.userStats;
+    if (!hasSavedUserStats && lastGeneratedData.userStats) {
+        try {
+            parseUserStats(lastGeneratedData.userStats);
+        } catch (error) {
+            console.warn('[RPG Companion] Failed to rebuild user stats from display data:', error);
+        }
+    }
+}
+
+function getCurrentSwipeText(message) {
+    const swipeId = Number(message?.swipe_id ?? 0);
+
+    if (Array.isArray(message?.swipes) && typeof message.swipes[swipeId] === 'string' && message.swipes[swipeId].trim()) {
+        return message.swipes[swipeId];
+    }
+
+    return typeof message?.mes === 'string' ? message.mes : '';
+}
+
+function repairLatestTrackerStateFromCurrentSwipeContent(chatMessages = getContext()?.chat || []) {
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+        const message = chatMessages[i];
+        if (!message || message.is_user || message.is_system) {
+            continue;
+        }
+
+        const swipeId = Number(message.swipe_id ?? 0);
+        if (getCurrentSwipeTrackerData(message)) {
+            continue;
+        }
+
+        const currentSwipeText = getCurrentSwipeText(message);
+        if (!currentSwipeText) {
+            continue;
+        }
+
+        const parsedData = parseResponse(currentSwipeText);
+        if (parsedData.userStats) {
+            parsedData.userStats = removeLocks(parsedData.userStats);
+        }
+        if (parsedData.infoBox) {
+            parsedData.infoBox = removeLocks(parsedData.infoBox);
+        }
+        if (parsedData.characterThoughts) {
+            parsedData.characterThoughts = removeLocks(parsedData.characterThoughts);
+        }
+
+        if (!parsedData.userStats && !parsedData.infoBox && !parsedData.characterThoughts) {
+            continue;
+        }
+
+        setMessageSwipeTrackerData(message, swipeId, {
+            userStats: parsedData.userStats || null,
+            infoBox: parsedData.infoBox || null,
+            characterThoughts: parsedData.characterThoughts || null
+        });
+
+        return true;
+    }
+
+    return false;
+}
+
+function restoreOrRepairLatestTrackerState() {
+    const chatMessages = getContext()?.chat || [];
+    let restored = restoreLatestTrackerStateFromChat(chatMessages);
+
+    if (!restored) {
+        const repaired = repairLatestTrackerStateFromCurrentSwipeContent(chatMessages);
+        if (repaired) {
+            restored = restoreLatestTrackerStateFromChat(chatMessages);
+        }
+    }
+
+    return restored;
+}
+
+function rerenderRpgState() {
+    renderUserStats();
+    renderInfoBox();
+    renderThoughts();
+    renderInventory();
+    renderQuests();
+    renderMusicPlayer($musicPlayerContainer[0]);
+    updateFabWidgets();
+    updateStripWidgets();
+}
+
+export function scheduleChatStateRehydration() {
+    chatStateRehydrateRunId++;
+    const runId = chatStateRehydrateRunId;
+    let attempts = 0;
+    const maxAttempts = 15;
+    const eagerRetryAttempts = 4;
+
+    const tryRestoreState = () => {
+        if (runId !== chatStateRehydrateRunId) {
+            return;
+        }
+
+        attempts++;
+
+        loadChatData();
+        restoreOrRepairLatestTrackerState();
+        maybeRehydrateUserStatsFromDisplayData();
+        rerenderRpgState();
+
+        const hasRestoredTrackerState = !!(
+            lastGeneratedData.userStats
+            || lastGeneratedData.infoBox
+            || lastGeneratedData.characterThoughts
+            || committedTrackerData.userStats
+            || committedTrackerData.infoBox
+            || committedTrackerData.characterThoughts
+        );
+        const hasStoredTrackerState = !!chat_metadata?.rpg_companion || hasAnyTrackerStateInChat();
+        const hasAssistantMessages = hasAssistantMessagesInChat();
+        const hasPotentialTrackerSource = hasPotentialTrackerSourceInChat();
+        const chatBodyReady = hasAssistantMessageBody();
+
+        if (chatBodyReady) {
+            updateChatThoughts();
+        }
+
+        const shouldRetryForRestore = !hasRestoredTrackerState && (
+            hasStoredTrackerState
+            || (hasAssistantMessages && attempts < eagerRetryAttempts)
+            || (hasPotentialTrackerSource && attempts < maxAttempts)
+        );
+
+        const shouldRetryForDom = !chatBodyReady && hasAssistantMessages;
+
+        if ((shouldRetryForRestore || shouldRetryForDom) && attempts < maxAttempts) {
+            setTimeout(tryRestoreState, 200);
+        }
+    };
+
+    setTimeout(tryRestoreState, 200);
+}
+
+export function onChatLoaded() {
+    loadChatData();
+    restoreOrRepairLatestTrackerState();
+    maybeRehydrateUserStatsFromDisplayData();
+    rerenderRpgState();
+    scheduleChatStateRehydration();
+    updateAllCheckpointIndicators();
+}
+
+function syncDisplayedTrackerStateFromChat() {
+    const restored = restoreOrRepairLatestTrackerState();
+
+    if (!restored) {
+        lastGeneratedData.userStats = null;
+        lastGeneratedData.infoBox = null;
+        lastGeneratedData.characterThoughts = null;
+        committedTrackerData.userStats = null;
+        committedTrackerData.infoBox = null;
+        committedTrackerData.characterThoughts = null;
+    }
+
+    rerenderRpgState();
+    updateChatThoughts();
 }
 
 /**
@@ -193,11 +426,11 @@ export async function onMessageReceived(data) {
             }
 
             const currentSwipeId = lastMessage.swipe_id || 0;
-            lastMessage.extra.rpg_companion_swipes[currentSwipeId] = {
+            setMessageSwipeTrackerData(lastMessage, currentSwipeId, {
                 userStats: parsedData.userStats,
                 infoBox: parsedData.infoBox,
                 characterThoughts: parsedData.characterThoughts
-            };
+            });
 
             // console.log('[RPG Companion] Stored RPG data for swipe', currentSwipeId);
 
@@ -243,6 +476,11 @@ export async function onMessageReceived(data) {
             updateMessageBlock(messageId, lastMessage, { rerenderMessage: true });
 
             // console.log('[RPG Companion] Cleaned message, removed tracker code blocks from DOM');
+
+            // Re-insert chat thoughts after SillyTavern finishes rerendering the cleaned message DOM.
+            if (parsedData.characterThoughts) {
+                setTimeout(() => updateChatThoughts(), 100);
+            }
 
             // Save to chat metadata
             saveChatData();
@@ -310,6 +548,7 @@ export function onCharacterChanged() {
     // Remove thought panel and icon when changing characters
     $('#rpg-thought-panel').remove();
     $('#rpg-thought-icon').remove();
+    $('.rpg-inline-thoughts, .rpg-inline-thought').remove();
     $('#chat').off('scroll.thoughtPanel');
     $(window).off('resize.thoughtPanel');
     $(document).off('click.thoughtPanel');
@@ -328,20 +567,9 @@ export function onCharacterChanged() {
     // already contains the committed state from when we last left this chat.
     // commitTrackerData() will be called naturally when new messages arrive.
 
-    // Re-render with the loaded data
-    renderUserStats();
-    renderInfoBox();
-    renderThoughts();
-    renderInventory();
-    renderQuests();
-    renderMusicPlayer($musicPlayerContainer[0]);
-
-    // Update FAB widgets and strip widgets with loaded data
-    updateFabWidgets();
-    updateStripWidgets();
-
-    // Update chat thought overlays
-    updateChatThoughts();
+    // Re-render with the loaded data and retry once SillyTavern finishes restoring chat state.
+    rerenderRpgState();
+    scheduleChatStateRehydration();
 
     // Update checkpoint indicators for the loaded chat
     updateAllCheckpointIndicators();
@@ -366,6 +594,7 @@ export function onMessageSwiped(messageIndex) {
     }
 
     const currentSwipeId = message.swipe_id || 0;
+    const swipeCount = Array.isArray(message.swipes) ? message.swipes.length : 0;
 
     // Only set flag to true if this swipe will trigger a NEW generation
     // Check if the swipe already exists (has content in the swipes array)
@@ -373,6 +602,8 @@ export function onMessageSwiped(messageIndex) {
         message.swipes[currentSwipeId] !== undefined &&
         message.swipes[currentSwipeId] !== null &&
         message.swipes[currentSwipeId].length > 0;
+    const swipeData = getCurrentSwipeTrackerData(message);
+    const isPendingNewSwipe = currentSwipeId >= swipeCount;
 
     if (!isExistingSwipe) {
         // This is a NEW swipe that will trigger generation
@@ -384,13 +615,16 @@ export function onMessageSwiped(messageIndex) {
         // console.log('[RPG Companion] 🔵 EXISTING swipe navigation - lastActionWasSwipe unchanged =', lastActionWasSwipe);
     }
 
+    if (isPendingNewSwipe) {
+        lastGeneratedData.characterThoughts = null;
+    }
+
     // console.log('[RPG Companion] Loading data for swipe', currentSwipeId);
 
     // IMPORTANT: onMessageSwiped is for DISPLAY only!
     // lastGeneratedData is for DISPLAY, committedTrackerData is for GENERATION
     // It's safe to load swipe data into lastGeneratedData - it won't be committed due to !lastActionWasSwipe check
-    if (message.extra && message.extra.rpg_companion_swipes && message.extra.rpg_companion_swipes[currentSwipeId]) {
-        const swipeData = message.extra.rpg_companion_swipes[currentSwipeId];
+    if (swipeData) {
 
         // Load swipe data into lastGeneratedData for display (both modes)
         lastGeneratedData.userStats = swipeData.userStats || null;
@@ -417,13 +651,22 @@ export function onMessageSwiped(messageIndex) {
     // Re-render the panels
     renderUserStats();
     renderInfoBox();
-    renderThoughts();
+    renderThoughts({ useCommittedFallback: !isPendingNewSwipe });
     renderInventory();
     renderQuests();
     renderMusicPlayer($musicPlayerContainer[0]);
 
     // Update chat thought overlays
     updateChatThoughts();
+}
+
+export function onMessageDeleted() {
+    if (!extensionSettings.enabled) {
+        return;
+    }
+
+    syncDisplayedTrackerStateFromChat();
+    saveChatData();
 }
 
 /**

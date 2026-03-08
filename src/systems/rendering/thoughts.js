@@ -15,7 +15,7 @@ import {
     addDebugLog
 } from '../../core/state.js';
 import { i18n } from '../../core/i18n.js';
-import { saveChatData, saveSettings } from '../../core/persistence.js';
+import { saveChatData, saveSettings, getCurrentMessageSwipeTrackerData, setMessageSwipeTrackerField } from '../../core/persistence.js';
 import { getSafeThumbnailUrl } from '../../utils/avatars.js';
 import { isItemLocked, setItemLock } from '../generation/lockManager.js';
 
@@ -154,7 +154,7 @@ function namesMatch(cardName, aiName) {
  * Displays character cards with avatars, relationship badges, and traits.
  * Includes event listeners for editable character fields.
  */
-export function renderThoughts({ preserveScroll = false } = {}) {
+export function renderThoughts({ preserveScroll = false, useCommittedFallback = true } = {}) {
     if (!extensionSettings.showCharacterThoughts || !$thoughtsContainer) {
         return;
     }
@@ -169,7 +169,7 @@ export function renderThoughts({ preserveScroll = false } = {}) {
     }
 
     // Don't render if no data exists (e.g., after cache clear)
-    const thoughtsData = lastGeneratedData.characterThoughts || committedTrackerData.characterThoughts;
+    const thoughtsData = lastGeneratedData.characterThoughts || (useCommittedFallback ? committedTrackerData.characterThoughts : null);
     if (!thoughtsData) {
         $thoughtsContainer.html('<div class="rpg-inventory-empty">No character data generated yet</div>');
         return;
@@ -193,7 +193,7 @@ export function renderThoughts({ preserveScroll = false } = {}) {
     const hasRelationshipEnabled = relationshipFields.length > 0;
 
     // Use committedTrackerData as fallback if lastGeneratedData is empty (e.g., after page refresh)
-    const characterThoughtsData = lastGeneratedData.characterThoughts || committedTrackerData.characterThoughts || '';
+    const characterThoughtsData = lastGeneratedData.characterThoughts || (useCommittedFallback ? committedTrackerData.characterThoughts : null) || '';
 
     // console.log('[RPG Companion] renderThoughts - Reading from lastGeneratedData:', JSON.stringify(lastGeneratedData.characterThoughts));
     // console.log('[RPG Companion] renderThoughts - Reading from committedTrackerData:', JSON.stringify(committedTrackerData.characterThoughts));
@@ -839,7 +839,7 @@ export function removeCharacter(characterName) {
                 if (message.extra && message.extra.rpg_companion_swipes) {
                     const swipeId = message.swipe_id || 0;
                     if (message.extra.rpg_companion_swipes[swipeId]) {
-                        message.extra.rpg_companion_swipes[swipeId].characterThoughts = lastGeneratedData.characterThoughts;
+                        setMessageSwipeTrackerField(message, swipeId, 'characterThoughts', lastGeneratedData.characterThoughts);
                     }
                 }
                 break;
@@ -969,7 +969,7 @@ export function addNewCharacter() {
                 if (message.extra && message.extra.rpg_companion_swipes) {
                     const swipeId = message.swipe_id || 0;
                     if (message.extra.rpg_companion_swipes[swipeId]) {
-                        message.extra.rpg_companion_swipes[swipeId].characterThoughts = lastGeneratedData.characterThoughts;
+                        setMessageSwipeTrackerField(message, swipeId, 'characterThoughts', lastGeneratedData.characterThoughts);
                     }
                 }
                 break;
@@ -1152,7 +1152,7 @@ export function updateCharacterField(characterName, field, value) {
                     if (message.extra && message.extra.rpg_companion_swipes) {
                         const swipeId = message.swipe_id || 0;
                         if (message.extra.rpg_companion_swipes[swipeId]) {
-                            message.extra.rpg_companion_swipes[swipeId].characterThoughts = lastGeneratedData.characterThoughts;
+                            setMessageSwipeTrackerField(message, swipeId, 'characterThoughts', lastGeneratedData.characterThoughts);
                         }
                     }
                     break;
@@ -1381,7 +1381,7 @@ export function updateCharacterField(characterName, field, value) {
                 if (message.extra && message.extra.rpg_companion_swipes) {
                     const swipeId = message.swipe_id || 0;
                     if (message.extra.rpg_companion_swipes[swipeId]) {
-                        message.extra.rpg_companion_swipes[swipeId].characterThoughts = lines.join('\n');
+                        setMessageSwipeTrackerField(message, swipeId, 'characterThoughts', lines.join('\n'));
                     }
                 }
                 break;
@@ -1438,66 +1438,265 @@ function renderThoughtsSidebarOnly() {
 }
 
 /**
- * Updates or removes thought overlays in the chat.
- * Creates floating thought bubbles positioned near character avatars.
+ * Updates or removes thoughts shown in chat.
+ * Renders either the original corner bubbles or inline dropdown cards.
  */
-export function updateChatThoughts() {
-    // console.log('[RPG Companion] ======== updateChatThoughts called ========');
-    // console.log('[RPG Companion] Extension enabled:', extensionSettings.enabled);
-    // console.log('[RPG Companion] showThoughtsInChat setting:', extensionSettings.showThoughtsInChat);
-    // console.log('[RPG Companion] Toggle element checked:', $('#rpg-toggle-thoughts-in-chat').prop('checked'));
-    // console.log('[RPG Companion] lastGeneratedData.characterThoughts:', lastGeneratedData.characterThoughts);
 
-    // Remove existing thought panel and icon
+let inlineThoughtsObserver = null;
+let inlineThoughtsRefreshTimeout = null;
+let isRefreshingInlineThoughts = false;
+
+export function updateChatThoughts(attempt = 0) {
+    const thoughtsStyle = extensionSettings.thoughtsInChatStyle || 'corner';
+    const openInlineThoughts = getOpenInlineThoughts();
+
+    // Remove old floating thought panel/icon (legacy cleanup)
     $('#rpg-thought-panel').remove();
     $('#rpg-thought-icon').remove();
     $('#chat').off('scroll.thoughtPanel');
     $(window).off('resize.thoughtPanel');
     $(document).off('click.thoughtPanel');
 
-    // If extension is disabled, thoughts in chat are disabled, or no thoughts, just return
-    if (!extensionSettings.enabled || !extensionSettings.showThoughtsInChat || !lastGeneratedData.characterThoughts) {
-        // console.log('[RPG Companion] Thoughts in chat disabled or no data');
+    // Remove any existing inline thought dropdowns from previous renders
+    $('.rpg-inline-thoughts, .rpg-inline-thought').remove();
+
+    const canRenderThoughts = extensionSettings.enabled
+        && extensionSettings.showThoughtsInChat
+        && !!lastGeneratedData.characterThoughts;
+
+    if (!canRenderThoughts) {
+        teardownInlineThoughtsObserver();
         return;
     }
 
-    // Parse the Present Characters data to get thoughts
-    let thoughtsArray = []; // Array of {name, emoji, thought}
+    const thoughtsArray = parseThoughtsArray();
+
+    if (thoughtsArray.length === 0) {
+        teardownInlineThoughtsObserver();
+        return;
+    }
+
+    const targetInfo = findThoughtTargetMessage();
+    let $targetMessage = targetInfo.$message;
+
+    if ((!$targetMessage || !$targetMessage.length || !$targetMessage.find('.mes_text').length) && attempt < 10) {
+        setTimeout(() => updateChatThoughts(attempt + 1), 120);
+        return;
+    }
+
+    if (!$targetMessage || !$targetMessage.length) {
+        teardownInlineThoughtsObserver();
+        return;
+    }
+
+    if (thoughtsStyle === 'inline') {
+        insertInlineThoughts($targetMessage, thoughtsArray, openInlineThoughts);
+        ensureInlineThoughtsObserver();
+    } else {
+        teardownInlineThoughtsObserver();
+        createThoughtPanel($targetMessage, thoughtsArray);
+    }
+}
+
+function findThoughtTargetMessage() {
+    const context = getContext();
+    const chat = context?.chat || [];
+    const currentThoughts = normalizeThoughtPayload(lastGeneratedData.characterThoughts);
+
+    let fallbackIndex = -1;
+
+    // Match the currently displayed thoughts against stored swipe payloads so the
+    // UI stays attached to the visible assistant reply after swipes, deletes, and reloads.
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const message = chat[i];
+        if (message?.is_user) continue;
+
+        if (fallbackIndex === -1) {
+            fallbackIndex = i;
+        }
+
+        const messageThoughts = getMessageThoughtPayload(message);
+        if (!currentThoughts || !messageThoughts) continue;
+
+        if (messageThoughts === currentThoughts) {
+            const $message = $(`#chat .mes[mesid="${i}"]`);
+            return { index: i, $message };
+        }
+    }
+
+    if (fallbackIndex !== -1) {
+        return {
+            index: fallbackIndex,
+            $message: $(`#chat .mes[mesid="${fallbackIndex}"]`)
+        };
+    }
+
+    return { index: -1, $message: $() };
+}
+
+function getMessageThoughtPayload(message) {
+    if (!message || message.is_user) {
+        return null;
+    }
+
+    const swipeData = getCurrentMessageSwipeTrackerData(message);
+    return normalizeThoughtPayload(swipeData?.characterThoughts ?? null);
+}
+
+function normalizeThoughtPayload(payload) {
+    if (!payload) {
+        return null;
+    }
+
+    if (typeof payload === 'object') {
+        return stableStringify(payload);
+    }
+
+    if (typeof payload !== 'string') {
+        return String(payload);
+    }
+
+    const trimmed = payload.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    try {
+        return stableStringify(JSON.parse(trimmed));
+    } catch {
+        return trimmed.replace(/\r\n/g, '\n');
+    }
+}
+
+function stableStringify(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(item => stableStringify(item)).join(',')}]`;
+    }
+
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+    }
+
+    return JSON.stringify(value);
+}
+
+function getOpenInlineThoughts() {
+    const openThoughts = new Set();
+
+    $('.rpg-inline-thought[open]').each(function () {
+        const characterName = ($(this).attr('data-character') || '').trim();
+        if (characterName) {
+            openThoughts.add(characterName);
+        }
+    });
+
+    return openThoughts;
+}
+
+function ensureInlineThoughtsObserver() {
+    if (inlineThoughtsObserver) {
+        return;
+    }
+
+    const chatElement = document.getElementById('chat');
+    if (!chatElement) {
+        return;
+    }
+
+    inlineThoughtsObserver = new MutationObserver((mutations) => {
+        if (isRefreshingInlineThoughts) {
+            return;
+        }
+
+        // SillyTavern rerenders message DOM after swipes, deletes, and message cleanup.
+        // Watch for those chat-level mutations and reattach inline thoughts once the
+        // target message body exists again, while ignoring our own refresh churn.
+        const shouldRefresh = mutations.some((mutation) => {
+            if (mutation.type !== 'childList') {
+                return false;
+            }
+
+            const touchedThoughtNode = [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
+                if (!(node instanceof HTMLElement)) {
+                    return false;
+                }
+
+                return node.classList?.contains('mes')
+                    || node.classList?.contains('mes_text')
+                    || node.querySelector?.('.mes, .mes_text');
+            });
+
+            return touchedThoughtNode;
+        });
+
+        if (!shouldRefresh) {
+            return;
+        }
+
+        clearTimeout(inlineThoughtsRefreshTimeout);
+        inlineThoughtsRefreshTimeout = setTimeout(() => {
+            if (!extensionSettings.enabled
+                || !extensionSettings.showThoughtsInChat
+                || (extensionSettings.thoughtsInChatStyle || 'corner') !== 'inline') {
+                teardownInlineThoughtsObserver();
+                return;
+            }
+
+            isRefreshingInlineThoughts = true;
+            try {
+                updateChatThoughts();
+            } finally {
+                isRefreshingInlineThoughts = false;
+            }
+        }, 50);
+    });
+
+    inlineThoughtsObserver.observe(chatElement, {
+        childList: true,
+        subtree: true
+    });
+}
+
+function teardownInlineThoughtsObserver() {
+    if (inlineThoughtsRefreshTimeout) {
+        clearTimeout(inlineThoughtsRefreshTimeout);
+        inlineThoughtsRefreshTimeout = null;
+    }
+
+    if (inlineThoughtsObserver) {
+        inlineThoughtsObserver.disconnect();
+        inlineThoughtsObserver = null;
+    }
+}
+
+function parseThoughtsArray() {
+    let thoughtsArray = [];
     const thoughtsConfig = extensionSettings.trackerConfig?.presentCharacters?.thoughts;
     const thoughtsLabel = thoughtsConfig?.name || 'Thoughts';
 
-    // Try JSON format first
     try {
         const parsed = typeof lastGeneratedData.characterThoughts === 'string'
             ? JSON.parse(lastGeneratedData.characterThoughts)
             : lastGeneratedData.characterThoughts;
 
-        // Handle both {characters: [...]} and direct array formats
         const charactersArray = Array.isArray(parsed) ? parsed : (parsed.characters || []);
 
         if (charactersArray.length > 0) {
-            // Extract thoughts from JSON character objects
+            const offScene = /\b(not\s+(currently\s+)?(in|at|present|in\s+the)\s+(the\s+)?(scene|area|room|location|vicinity))\b|\b(off[\s-]?scene)\b|\b(not\s+present)\b|\b(absent)\b|\b(away\s+from\s+(the\s+)?scene)\b/i;
             thoughtsArray = charactersArray
-                .filter(char => char.thoughts && char.thoughts.content)
+                .filter(char => char.thoughts && char.thoughts.content && !offScene.test(char.thoughts.content))
                 .map(char => ({
-                    name: (char.name || '').toLowerCase(),
+                    name: (char.name || ''),
                     emoji: char.emoji || '👤',
                     thought: char.thoughts.content
                 }));
-
-            debugLog('[RPG Thoughts Bubble] ✓ Parsed JSON format, thoughts:', thoughtsArray.length);
         }
     } catch (e) {
         debugLog('[RPG Thoughts Bubble] Not JSON format, falling back to text parsing');
     }
 
-    // If JSON parsing failed or returned empty, try text format
-    if (thoughtsArray.length === 0) {
+    if (thoughtsArray.length === 0 && lastGeneratedData.characterThoughts) {
         const lines = lastGeneratedData.characterThoughts.split('\n');
-
-        // console.log('[RPG Companion] Parsing thoughts from lines:', lines);
-
-        // Parse new format to build character map and thoughts
         let currentCharName = null;
         let currentCharEmoji = null;
 
@@ -1513,74 +1712,103 @@ export function updateChatThoughts() {
                 continue;
             }
 
-            // Check if this is a character name line (starts with "- ")
             if (line.startsWith('- ')) {
                 const name = line.substring(2).trim();
                 if (name && name.toLowerCase() !== 'unavailable') {
                     currentCharName = name;
-                    currentCharEmoji = null; // Reset emoji for new character
+                    currentCharEmoji = null;
                 } else {
                     currentCharName = null;
                     currentCharEmoji = null;
                 }
-            }
-            // Check if this is a Details line (contains the emoji)
-            else if (line.startsWith('Details:') && currentCharName) {
+            } else if (line.startsWith('Details:') && currentCharName) {
                 const detailsContent = line.substring(line.indexOf(':') + 1).trim();
                 const parts = detailsContent.split('|').map(p => p.trim());
-
-                // First part is the emoji
                 if (parts.length > 0) {
                     currentCharEmoji = parts[0];
                 }
-            }
-            // Check if this is a Thoughts line
-            else if (line.startsWith(thoughtsLabel + ':') && currentCharName && currentCharEmoji) {
+            } else if (line.startsWith(thoughtsLabel + ':') && currentCharName && currentCharEmoji) {
                 const thoughtContent = line.substring(thoughtsLabel.length + 1).trim();
-
-                // The thought content is just the text (no emoji prefix in new format)
                 if (thoughtContent) {
                     thoughtsArray.push({
-                        name: currentCharName.toLowerCase(),
+                        name: currentCharName,
                         emoji: currentCharEmoji,
                         thought: thoughtContent
                     });
                 }
             }
         }
-    } // End of text format parsing for thoughts bubbles
+    }
 
-    debugLog('[RPG Thoughts] Parsed thoughts:', thoughtsArray);
+    return thoughtsArray;
+}
 
-    // If no thoughts parsed, return
-    if (thoughtsArray.length === 0) {
-        // console.log('[RPG Companion] No thoughts parsed, returning');
+function escapeInlineThoughtHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function insertInlineThoughts($message, thoughtsArray, openThoughts = new Set()) {
+    const $mesText = $message.find('.mes_text');
+    if (!$mesText.length) {
         return;
     }
 
-    // console.log('[RPG Companion] Total thoughts:', thoughtsArray.length);
-    // console.log('[RPG Companion] Thoughts array:', thoughtsArray);
-
-    // Find the last message to position near
-    const $messages = $('#chat .mes');
-    let $targetMessage = null;
-
-    // Find the most recent non-user message
-    for (let i = $messages.length - 1; i >= 0; i--) {
-        const $message = $messages.eq(i);
-        if ($message.attr('is_user') !== 'true') {
-            $targetMessage = $message;
-            break;
-        }
+    const thoughtsMap = {};
+    for (const thoughtData of thoughtsArray) {
+        thoughtsMap[(thoughtData.name || '').toLowerCase()] = thoughtData;
     }
 
-    if (!$targetMessage) {
-        // console.log('[RPG Companion] No target message found');
+    const $container = $('<div class="rpg-inline-thoughts"></div>');
+    bindInlineThoughtEvents($container);
+
+    for (const [, thoughtData] of Object.entries(thoughtsMap)) {
+        const $dropdown = createInlineThoughtDropdown(thoughtData, openThoughts);
+        $container.append($dropdown);
+    }
+
+    if (!$container.children().length) {
         return;
     }
 
-    // Create the thought panel with all thoughts
-    createThoughtPanel($targetMessage, thoughtsArray);
+    // Mount outside .mes_text so SillyTavern's click-to-edit handlers do not
+    // intercept summary clicks before the details element can toggle.
+    const $mediaWrapper = $message.find('.mes_media_wrapper').first();
+    if ($mediaWrapper.length) {
+        $container.insertBefore($mediaWrapper);
+    } else {
+        $container.insertAfter($mesText.last());
+    }
+}
+
+function bindInlineThoughtEvents($container) {
+    $container.on('click mousedown touchstart', '.rpg-inline-thought, .rpg-inline-thought-summary, .rpg-inline-thought-content', function (e) {
+        e.stopPropagation();
+    });
+}
+
+function createInlineThoughtDropdown(thoughtData, openThoughts = new Set()) {
+    const characterName = thoughtData.name || '';
+    const characterEmoji = thoughtData.emoji || '👤';
+    const thoughtText = thoughtData.thought || '';
+    const normalizedCharacterName = characterName.toLowerCase();
+    const openAttribute = openThoughts.has(normalizedCharacterName) ? ' open' : '';
+
+    return $(`
+        <details class="rpg-inline-thought" data-character="${escapeInlineThoughtHtml(normalizedCharacterName)}"${openAttribute}>
+            <summary class="rpg-inline-thought-summary">
+                <span class="rpg-inline-thought-icon">${escapeInlineThoughtHtml(characterEmoji)}</span>
+                <span class="rpg-inline-thought-name">${escapeInlineThoughtHtml(characterName)}'s thoughts</span>
+            </summary>
+            <div class="rpg-inline-thought-content">
+                <div class="rpg-inline-thought-text">${escapeInlineThoughtHtml(thoughtText)}</div>
+            </div>
+        </details>
+    `);
 }
 
 // ===== GLOBAL DRAGGING SETUP FOR THOUGHT ICON (MOBILE ONLY) =====

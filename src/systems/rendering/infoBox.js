@@ -10,7 +10,7 @@ import {
     committedTrackerData,
     $infoBoxContainer
 } from '../../core/state.js';
-import { saveChatData } from '../../core/persistence.js';
+import { saveChatData, setMessageSwipeTrackerField } from '../../core/persistence.js';
 import { i18n } from '../../core/i18n.js';
 import { isItemLocked } from '../generation/lockManager.js';
 import { repairJSON } from '../../utils/jsonRepair.js';
@@ -989,7 +989,7 @@ export function updateInfoBoxField(field, value) {
                 if (message.extra && message.extra.rpg_companion_swipes) {
                     const swipeId = message.swipe_id || 0;
                     if (message.extra.rpg_companion_swipes[swipeId]) {
-                        message.extra.rpg_companion_swipes[swipeId].infoBox = updatedLines.join('\n');
+                        setMessageSwipeTrackerField(message, swipeId, 'infoBox', updatedLines.join('\n'));
                         // console.log('[RPG Companion] Updated infoBox in message swipe data');
                     }
                 }
@@ -1074,7 +1074,7 @@ function updateRecentEvent(field, value) {
                     if (message.extra && message.extra.rpg_companion_swipes) {
                         const swipeId = message.swipe_id || 0;
                         if (message.extra.rpg_companion_swipes[swipeId]) {
-                            message.extra.rpg_companion_swipes[swipeId].infoBox = updatedLines.join('\n');
+                            setMessageSwipeTrackerField(message, swipeId, 'infoBox', updatedLines.join('\n'));
                         }
                     }
                     break;
