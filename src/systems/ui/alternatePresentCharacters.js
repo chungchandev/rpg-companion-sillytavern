@@ -1,5 +1,6 @@
 import { extensionSettings } from '../../core/state.js';
 import { i18n } from '../../core/i18n.js';
+import { getExpressionPortraitForCharacter } from '../integration/expressionSync.js';
 import {
     getPresentCharactersTrackerData,
     parsePresentCharacters,
@@ -132,7 +133,9 @@ export function renderAlternatePresentCharacters({ useCommittedFallback = true }
     `;
 
     for (const character of presentCharacters) {
-        const portrait = resolvePresentCharacterPortrait(character.name);
+        const portrait = (extensionSettings.syncExpressionsToPresentCharacters
+            ? getExpressionPortraitForCharacter(character.name)
+            : null) || resolvePresentCharacterPortrait(character.name);
         const name = escapeHtml(character.name || '');
 
         html += `

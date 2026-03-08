@@ -11,6 +11,7 @@ import {
     $infoBoxContainer,
     $thoughtsContainer,
     $userStatsContainer,
+    clearSyncedExpressionPortraits,
     setPendingDiceRoll,
     getPendingDiceRoll,
     clearSessionAvatarPrompts
@@ -370,6 +371,7 @@ export function setupSettingsPopup() {
 
         // Clear session avatar prompts
         clearSessionAvatarPrompts();
+        clearSyncedExpressionPortraits();
 
         // Clear chat metadata immediately (don't wait for debounced save)
         const context = getContext();

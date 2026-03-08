@@ -19,6 +19,8 @@ export let extensionSettings = {
     showInfoBox: true,
     showCharacterThoughts: true,
     showAlternatePresentCharactersPanel: false,
+    syncExpressionsToPresentCharacters: false,
+    hideDefaultExpressionDisplay: false,
     showInventory: true, // Show inventory section (v2 system)
     showQuests: true, // Show quests section
     showThoughtsInChat: true, // Show thoughts overlay in chat
@@ -359,6 +361,40 @@ export function getSessionAvatarPrompt(characterName) {
 
 export function clearSessionAvatarPrompts() {
     sessionAvatarPrompts = {};
+}
+
+/**
+ * Per-chat storage for synced Character Expressions portraits.
+ * Maps normalized character names to the last captured expression image URL.
+ */
+export let syncedExpressionPortraits = {};
+
+export function setSyncedExpressionPortrait(characterName, src) {
+    if (!characterName || !src) {
+        return;
+    }
+
+    syncedExpressionPortraits[characterName] = src;
+}
+
+export function removeSyncedExpressionPortrait(characterName) {
+    if (!characterName) {
+        return;
+    }
+
+    delete syncedExpressionPortraits[characterName];
+}
+
+export function setSyncedExpressionPortraits(portraits) {
+    syncedExpressionPortraits = portraits && typeof portraits === 'object' ? { ...portraits } : {};
+}
+
+export function getSyncedExpressionPortrait(characterName) {
+    return syncedExpressionPortraits[characterName] || null;
+}
+
+export function clearSyncedExpressionPortraits() {
+    syncedExpressionPortraits = {};
 }
 
 /**

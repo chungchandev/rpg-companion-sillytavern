@@ -9,10 +9,13 @@ import {
     extensionSettings,
     lastGeneratedData,
     committedTrackerData,
+    syncedExpressionPortraits,
     setExtensionSettings,
     updateExtensionSettings,
     setLastGeneratedData,
     setCommittedTrackerData,
+    setSyncedExpressionPortraits,
+    clearSyncedExpressionPortraits,
     FEATURE_FLAGS
 } from './state.js';
 import { migrateInventory } from '../utils/migration.js';
@@ -381,6 +384,16 @@ export function loadSettings() {
                 settingsChanged = true;
             }
 
+            if (extensionSettings.syncExpressionsToPresentCharacters === undefined) {
+                extensionSettings.syncExpressionsToPresentCharacters = false;
+                settingsChanged = true;
+            }
+
+            if (extensionSettings.hideDefaultExpressionDisplay === undefined) {
+                extensionSettings.hideDefaultExpressionDisplay = false;
+                settingsChanged = true;
+            }
+
             // Save migrated settings
             if (settingsChanged) {
                 saveSettings();
@@ -465,6 +478,7 @@ export function saveChatData() {
         quests: extensionSettings.quests,
         lastGeneratedData: lastGeneratedData,
         committedTrackerData: committedTrackerData,
+        syncedExpressionPortraits: syncedExpressionPortraits,
         timestamp: Date.now()
     };
 
@@ -548,6 +562,7 @@ export function loadChatData() {
             infoBox: null,
             characterThoughts: null
         });
+        clearSyncedExpressionPortraits();
     }
 
     // Restore stats
@@ -594,6 +609,12 @@ export function loadChatData() {
         setLastGeneratedData({ ...savedData.lastGeneratedData });
     } else {
         // console.log('[RPG Companion] ⚠️ No lastGeneratedData found in save');
+    }
+
+    if (savedData?.syncedExpressionPortraits && typeof savedData.syncedExpressionPortraits === 'object') {
+        setSyncedExpressionPortraits(savedData.syncedExpressionPortraits);
+    } else {
+        clearSyncedExpressionPortraits();
     }
 
     // Migrate inventory in chat data if feature flag enabled

@@ -30,6 +30,8 @@ export const defaultSettings = {
     showInfoBox: true,
     showCharacterThoughts: true,
     showAlternatePresentCharactersPanel: false,
+    syncExpressionsToPresentCharacters: false,
+    hideDefaultExpressionDisplay: false,
     showInventory: true, // Show inventory section (v2 system)
     showQuests: true, // Show quests section
     showLockIcons: true, // Show lock/unlock icons on tracker items

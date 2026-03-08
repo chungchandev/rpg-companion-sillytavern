@@ -135,6 +135,14 @@ import {
     updateStripWidgets
 } from './src/systems/ui/desktop.js';
 import { removeAlternatePresentCharactersPanel } from './src/systems/ui/alternatePresentCharacters.js';
+import {
+    initExpressionSync,
+    queueExpressionCaptureForSpeaker,
+    onExpressionSyncSettingChanged,
+    onHideDefaultExpressionDisplaySettingChanged,
+    clearExpressionSyncCache,
+    onExpressionSyncChatChanged
+} from './src/systems/integration/expressionSync.js';
 
 // Feature modules
 import { setupPlotButtons, sendPlotProgression } from './src/systems/features/plotProgression.js';
@@ -220,6 +228,7 @@ async function addExtensionSettings() {
             clearExtensionPrompts();
             updateChatThoughts(); // Remove thought bubbles
             cleanupCheckpointUI(); // Remove checkpoint buttons and indicators
+            clearExpressionSyncCache();
 
             // Disable dynamic weather effects
             toggleDynamicWeather(false);
@@ -235,6 +244,7 @@ async function addExtensionSettings() {
             await initUI();
             loadChatData(); // Load chat data for current chat
             scheduleChatStateRehydration();
+            initExpressionSync();
             updateChatThoughts(); // Create thought bubbles if data exists
             injectCheckpointButton(); // Re-add checkpoint buttons
             updateAllCheckpointIndicators(); // Update button states
@@ -348,6 +358,18 @@ async function initUI() {
         extensionSettings.showAlternatePresentCharactersPanel = $(this).prop('checked');
         saveSettings();
         renderThoughts();
+    });
+
+    $('#rpg-toggle-sync-expressions').on('change', function() {
+        extensionSettings.syncExpressionsToPresentCharacters = $(this).prop('checked');
+        saveSettings();
+        onExpressionSyncSettingChanged(extensionSettings.syncExpressionsToPresentCharacters);
+    });
+
+    $('#rpg-toggle-hide-default-expressions').on('change', function() {
+        extensionSettings.hideDefaultExpressionDisplay = $(this).prop('checked');
+        saveSettings();
+        onHideDefaultExpressionDisplaySettingChanged(extensionSettings.hideDefaultExpressionDisplay);
     });
 
     $('#rpg-toggle-inventory').on('change', function() {
@@ -1063,6 +1085,8 @@ async function initUI() {
     $('#rpg-toggle-info-box').prop('checked', extensionSettings.showInfoBox);
     $('#rpg-toggle-thoughts').prop('checked', extensionSettings.showCharacterThoughts);
     $('#rpg-toggle-alt-present-characters').prop('checked', extensionSettings.showAlternatePresentCharactersPanel ?? false);
+    $('#rpg-toggle-sync-expressions').prop('checked', extensionSettings.syncExpressionsToPresentCharacters === true);
+    $('#rpg-toggle-hide-default-expressions').prop('checked', extensionSettings.hideDefaultExpressionDisplay === true);
     $('#rpg-toggle-inventory').prop('checked', extensionSettings.showInventory);
     $('#rpg-toggle-quests').prop('checked', extensionSettings.showQuests);
     $('#rpg-toggle-lock-icons').prop('checked', extensionSettings.showLockIcons ?? true);
@@ -1305,6 +1329,7 @@ jQuery(async () => {
         try {
             loadChatData();
             scheduleChatStateRehydration();
+            initExpressionSync();
             // Initialize FAB widgets and strip widgets with any loaded data
             updateFabWidgets();
             updateStripWidgets();
@@ -1381,6 +1406,53 @@ jQuery(async () => {
                 [event_types.MESSAGE_SWIPED]: onMessageSwiped,
                 [event_types.USER_MESSAGE_RENDERED]: updatePersonaAvatar,
                 [event_types.SETTINGS_UPDATED]: updatePersonaAvatar
+            });
+
+            eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, (messageId) => {
+                if (!extensionSettings.enabled) {
+                    return;
+                }
+
+                const renderedMessage = chat[messageId];
+                if (renderedMessage && !renderedMessage.is_user && !renderedMessage.is_system) {
+                    queueExpressionCaptureForSpeaker(renderedMessage.name);
+                }
+            });
+
+            eventSource.on(event_types.MESSAGE_UPDATED, (messageId) => {
+                if (!extensionSettings.enabled) {
+                    return;
+                }
+
+                const updatedMessage = chat[messageId];
+                if (updatedMessage && !updatedMessage.is_user && !updatedMessage.is_system) {
+                    queueExpressionCaptureForSpeaker(updatedMessage.name);
+                }
+            });
+
+            eventSource.on(event_types.MESSAGE_SWIPED, (messageIndex) => {
+                if (!extensionSettings.enabled) {
+                    return;
+                }
+
+                const swipedMessage = chat[messageIndex];
+                if (swipedMessage && !swipedMessage.is_user && !swipedMessage.is_system) {
+                    queueExpressionCaptureForSpeaker(swipedMessage.name);
+                }
+            });
+
+            eventSource.on(event_types.CHAT_CHANGED, () => {
+                clearExpressionSyncCache();
+                setTimeout(() => onExpressionSyncChatChanged(), 0);
+            });
+
+            eventSource.on(event_types.MESSAGE_DELETED, () => {
+                if (!extensionSettings.enabled) {
+                    return;
+                }
+
+                clearExpressionSyncCache();
+                setTimeout(() => onExpressionSyncChatChanged(), 0);
             });
         } catch (error) {
             console.error('[RPG Companion] Event registration failed:', error);
