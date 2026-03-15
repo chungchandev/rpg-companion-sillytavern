@@ -30,7 +30,7 @@ export const defaultSettings = {
     showInfoBox: true,
     showCharacterThoughts: true,
     showAlternatePresentCharactersPanel: false,
-    syncExpressionsToPresentCharacters: false,
+    enableThoughtBasedExpressions: false,
     hideDefaultExpressionDisplay: false,
     showInventory: true, // Show inventory section (v2 system)
     showQuests: true, // Show quests section

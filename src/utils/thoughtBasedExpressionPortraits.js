@@ -1,6 +1,6 @@
 import {
-    syncedExpressionPortraits,
-    getSyncedExpressionPortrait
+    thoughtBasedExpressionPortraits,
+    getThoughtBasedExpressionPortrait
 } from '../core/state.js';
 import {
     isSafeImageSrc,
@@ -35,7 +35,7 @@ function isDocumentLikeUrl(src) {
         && candidate.search === current.search;
 }
 
-export function isUsableExpressionSrc(src) {
+export function isUsableThoughtBasedExpressionSrc(src) {
     const normalized = normalizeImageSrc(src);
     if (!normalized) {
         return false;
@@ -48,7 +48,7 @@ export function isUsableExpressionSrc(src) {
     return isSafeImageSrc(normalized);
 }
 
-export function getExpressionPortraitForCharacter(characterName) {
+export function getThoughtBasedExpressionPortraitForCharacter(characterName) {
     if (!isExpressionsExtensionEnabled()) {
         return null;
     }
@@ -58,13 +58,13 @@ export function getExpressionPortraitForCharacter(characterName) {
         return null;
     }
 
-    const exact = getSyncedExpressionPortrait(target);
-    if (isUsableExpressionSrc(exact)) {
+    const exact = getThoughtBasedExpressionPortrait(target);
+    if (isUsableThoughtBasedExpressionSrc(exact)) {
         return exact;
     }
 
-    for (const [storedName, src] of Object.entries(syncedExpressionPortraits)) {
-        if (namesMatch(storedName, target) && isUsableExpressionSrc(src)) {
+    for (const [storedName, src] of Object.entries(thoughtBasedExpressionPortraits)) {
+        if (namesMatch(storedName, target) && isUsableThoughtBasedExpressionSrc(src)) {
             return src;
         }
     }

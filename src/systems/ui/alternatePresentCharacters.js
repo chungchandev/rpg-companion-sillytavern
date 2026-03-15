@@ -1,6 +1,6 @@
 import { extensionSettings } from '../../core/state.js';
 import { i18n } from '../../core/i18n.js';
-import { getExpressionPortraitForCharacter } from '../../utils/expressionPortraits.js';
+import { getThoughtBasedExpressionPortraitForCharacter } from '../../utils/thoughtBasedExpressionPortraits.js';
 import { getSafeImageSrc } from '../../utils/imageUrls.js';
 import {
     getPresentCharactersTrackerData,
@@ -49,8 +49,8 @@ function handlePortraitLoadError() {
 }
 
 function createAlternatePresentCharacterCard(character) {
-    const rawPortrait = (extensionSettings.syncExpressionsToPresentCharacters
-        ? getExpressionPortraitForCharacter(character.name)
+    const rawPortrait = (extensionSettings.enableThoughtBasedExpressions
+        ? getThoughtBasedExpressionPortraitForCharacter(character.name)
         : null) || resolvePresentCharacterPortrait(character.name);
     const portrait = getSafeImageSrc(rawPortrait);
     const name = String(character.name || '');

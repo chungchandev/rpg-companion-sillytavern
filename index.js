@@ -139,15 +139,15 @@ import {
     renderAlternatePresentCharacters
 } from './src/systems/ui/alternatePresentCharacters.js';
 import {
-    initExpressionSync,
-    queueExpressionSyncFromThoughts,
-    onExpressionSyncSettingChanged,
+    initThoughtBasedExpressions,
+    queueThoughtBasedExpressionsUpdate,
+    onThoughtBasedExpressionsSettingChanged,
     onAlternatePresentCharactersVisibilityChanged,
     onHideDefaultExpressionDisplaySettingChanged,
-    clearExpressionSyncCache,
-    onExpressionSyncChatChanged,
-    setExpressionSyncRefreshHandler
-} from './src/systems/integration/expressionSync.js';
+    clearThoughtBasedExpressionsCache,
+    onThoughtBasedExpressionsChatChanged,
+    setThoughtBasedExpressionsRefreshHandler
+} from './src/systems/integration/thoughtBasedExpressions.js';
 
 // Feature modules
 import { setupPlotButtons, sendPlotProgression } from './src/systems/features/plotProgression.js';
@@ -177,7 +177,7 @@ import {
 // Old state variable declarations removed - now imported from core modules
 // (extensionSettings, lastGeneratedData, committedTrackerData, etc. are now in src/core/state.js)
 
-setExpressionSyncRefreshHandler(() => {
+setThoughtBasedExpressionsRefreshHandler(() => {
     renderAlternatePresentCharacters({ useCommittedFallback: true });
 });
 
@@ -237,7 +237,7 @@ async function addExtensionSettings() {
             clearExtensionPrompts();
             updateChatThoughts(); // Remove thought bubbles
             cleanupCheckpointUI(); // Remove checkpoint buttons and indicators
-            clearExpressionSyncCache();
+            clearThoughtBasedExpressionsCache();
 
             // Disable dynamic weather effects
             toggleDynamicWeather(false);
@@ -253,7 +253,7 @@ async function addExtensionSettings() {
             await initUI();
             loadChatData(); // Load chat data for current chat
             scheduleChatStateRehydration();
-            initExpressionSync();
+            initThoughtBasedExpressions();
             updateChatThoughts(); // Create thought bubbles if data exists
             injectCheckpointButton(); // Re-add checkpoint buttons
             updateAllCheckpointIndicators(); // Update button states
@@ -370,10 +370,10 @@ async function initUI() {
         onAlternatePresentCharactersVisibilityChanged();
     });
 
-    $('#rpg-toggle-sync-expressions').on('change', function() {
-        extensionSettings.syncExpressionsToPresentCharacters = $(this).prop('checked');
+    $('#rpg-toggle-thought-based-expressions').on('change', function() {
+        extensionSettings.enableThoughtBasedExpressions = $(this).prop('checked');
         saveSettings();
-        onExpressionSyncSettingChanged(extensionSettings.syncExpressionsToPresentCharacters);
+        onThoughtBasedExpressionsSettingChanged(extensionSettings.enableThoughtBasedExpressions);
     });
 
     $('#rpg-toggle-hide-default-expressions').on('change', function() {
@@ -1095,7 +1095,7 @@ async function initUI() {
     $('#rpg-toggle-info-box').prop('checked', extensionSettings.showInfoBox);
     $('#rpg-toggle-thoughts').prop('checked', extensionSettings.showCharacterThoughts);
     $('#rpg-toggle-alt-present-characters').prop('checked', extensionSettings.showAlternatePresentCharactersPanel ?? false);
-    $('#rpg-toggle-sync-expressions').prop('checked', extensionSettings.syncExpressionsToPresentCharacters === true);
+    $('#rpg-toggle-thought-based-expressions').prop('checked', extensionSettings.enableThoughtBasedExpressions === true);
     $('#rpg-toggle-hide-default-expressions').prop('checked', extensionSettings.hideDefaultExpressionDisplay === true);
     $('#rpg-toggle-inventory').prop('checked', extensionSettings.showInventory);
     $('#rpg-toggle-quests').prop('checked', extensionSettings.showQuests);
@@ -1339,7 +1339,7 @@ jQuery(async () => {
         try {
             loadChatData();
             scheduleChatStateRehydration();
-            initExpressionSync();
+            initThoughtBasedExpressions();
             // Initialize FAB widgets and strip widgets with any loaded data
             updateFabWidgets();
             updateStripWidgets();
@@ -1425,7 +1425,7 @@ jQuery(async () => {
 
                 const renderedMessage = chat[messageId];
                 if (renderedMessage && !renderedMessage.is_user && !renderedMessage.is_system) {
-                    queueExpressionSyncFromThoughts();
+                    queueThoughtBasedExpressionsUpdate();
                 }
             });
 
@@ -1436,7 +1436,7 @@ jQuery(async () => {
 
                 const updatedMessage = chat[messageId];
                 if (updatedMessage && !updatedMessage.is_user && !updatedMessage.is_system) {
-                    queueExpressionSyncFromThoughts();
+                    queueThoughtBasedExpressionsUpdate();
                 }
             });
 
@@ -1447,13 +1447,13 @@ jQuery(async () => {
 
                 const swipedMessage = chat[messageIndex];
                 if (swipedMessage && !swipedMessage.is_user && !swipedMessage.is_system) {
-                    queueExpressionSyncFromThoughts({ immediate: true });
+                    queueThoughtBasedExpressionsUpdate({ immediate: true });
                 }
             });
 
             eventSource.on(event_types.CHAT_CHANGED, () => {
-                clearExpressionSyncCache();
-                setTimeout(() => onExpressionSyncChatChanged(), 0);
+                clearThoughtBasedExpressionsCache();
+                setTimeout(() => onThoughtBasedExpressionsChatChanged(), 0);
             });
 
             eventSource.on(event_types.MESSAGE_DELETED, () => {
@@ -1461,8 +1461,8 @@ jQuery(async () => {
                     return;
                 }
 
-                clearExpressionSyncCache();
-                setTimeout(() => onExpressionSyncChatChanged(), 0);
+                clearThoughtBasedExpressionsCache();
+                setTimeout(() => onThoughtBasedExpressionsChatChanged(), 0);
             });
         } catch (error) {
             console.error('[RPG Companion] Event registration failed:', error);

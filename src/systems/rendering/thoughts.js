@@ -22,7 +22,7 @@ import {
 } from '../../utils/presentCharacters.js';
 import { isItemLocked, setItemLock } from '../generation/lockManager.js';
 import { renderAlternatePresentCharacters } from '../ui/alternatePresentCharacters.js';
-import { queueExpressionSyncFromThoughts } from '../integration/expressionSync.js';
+import { queueThoughtBasedExpressionsUpdate } from '../integration/thoughtBasedExpressions.js';
 
 /**
  * Helper to generate lock icon HTML if setting is enabled
@@ -93,7 +93,7 @@ function getStatColor(percentage, lowColor, highColor, lowOpacity = 100, highOpa
  */
 export function renderThoughts({ preserveScroll = false, useCommittedFallback = true } = {}) {
     renderAlternatePresentCharacters({ useCommittedFallback });
-    queueExpressionSyncFromThoughts();
+    queueThoughtBasedExpressionsUpdate();
 
     if (!extensionSettings.showCharacterThoughts || !$thoughtsContainer) {
         return;
@@ -1284,7 +1284,7 @@ export function updateCharacterField(characterName, field, value) {
     // console.log('[RPG Companion] After update - lastGeneratedData.characterThoughts:', lastGeneratedData.characterThoughts);
 
     if (field === 'name' || isEditingThoughts) {
-        queueExpressionSyncFromThoughts({ immediate: true, force: true });
+        queueThoughtBasedExpressionsUpdate({ immediate: true, force: true });
     }
 
     if (isEditingThoughts && extensionSettings.showThoughtsInChat) {

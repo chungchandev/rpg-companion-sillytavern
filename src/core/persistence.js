@@ -9,13 +9,13 @@ import {
     extensionSettings,
     lastGeneratedData,
     committedTrackerData,
-    syncedExpressionPortraits,
+    thoughtBasedExpressionPortraits,
     setExtensionSettings,
     updateExtensionSettings,
     setLastGeneratedData,
     setCommittedTrackerData,
-    setSyncedExpressionPortraits,
-    clearSyncedExpressionPortraits,
+    setThoughtBasedExpressionPortraits,
+    clearThoughtBasedExpressionPortraits,
     FEATURE_FLAGS
 } from './state.js';
 import { migrateInventory } from '../utils/migration.js';
@@ -384,11 +384,6 @@ export function loadSettings() {
                 settingsChanged = true;
             }
 
-            if (extensionSettings.syncExpressionsToPresentCharacters === undefined) {
-                extensionSettings.syncExpressionsToPresentCharacters = false;
-                settingsChanged = true;
-            }
-
             if (extensionSettings.hideDefaultExpressionDisplay === undefined) {
                 extensionSettings.hideDefaultExpressionDisplay = false;
                 settingsChanged = true;
@@ -478,7 +473,7 @@ export function saveChatData() {
         quests: extensionSettings.quests,
         lastGeneratedData: lastGeneratedData,
         committedTrackerData: committedTrackerData,
-        syncedExpressionPortraits: syncedExpressionPortraits,
+        thoughtBasedExpressionPortraits: thoughtBasedExpressionPortraits,
         timestamp: Date.now()
     };
 
@@ -562,7 +557,7 @@ export function loadChatData() {
             infoBox: null,
             characterThoughts: null
         });
-        clearSyncedExpressionPortraits();
+        clearThoughtBasedExpressionPortraits();
     }
 
     // Restore stats
@@ -611,10 +606,10 @@ export function loadChatData() {
         // console.log('[RPG Companion] ⚠️ No lastGeneratedData found in save');
     }
 
-    if (savedData?.syncedExpressionPortraits && typeof savedData.syncedExpressionPortraits === 'object') {
-        setSyncedExpressionPortraits(savedData.syncedExpressionPortraits);
+    if (savedData?.thoughtBasedExpressionPortraits && typeof savedData.thoughtBasedExpressionPortraits === 'object') {
+        setThoughtBasedExpressionPortraits(savedData.thoughtBasedExpressionPortraits);
     } else {
-        clearSyncedExpressionPortraits();
+        clearThoughtBasedExpressionPortraits();
     }
 
     // Migrate inventory in chat data if feature flag enabled

@@ -1,7 +1,7 @@
 /**
- * Character Expressions -> below-chat Present Characters portrait sync.
+ * Thought-based Character Expressions for the below-chat Present Characters panel.
  *
- * Derives expression portraits from the current Present Characters thoughts
+ * Derives portrait expressions from the current Present Characters thoughts
  * payload, while keeping SillyTavern's native Character Expressions widget
  * independent from the below-chat panel.
  */
@@ -9,15 +9,15 @@
 import { getContext } from '../../../../../../extensions.js';
 import {
     extensionSettings,
-    syncedExpressionPortraits,
-    setSyncedExpressionPortraits
+    thoughtBasedExpressionPortraits,
+    setThoughtBasedExpressionPortraits
 } from '../../core/state.js';
 import {
     getCurrentMessageSwipeTrackerData,
     saveChatData,
     setMessageSwipeTrackerField
 } from '../../core/persistence.js';
-import { isUsableExpressionSrc } from '../../utils/expressionPortraits.js';
+import { isUsableThoughtBasedExpressionSrc } from '../../utils/thoughtBasedExpressionPortraits.js';
 import {
     getPresentCharactersTrackerData,
     parsePresentCharacters
@@ -35,16 +35,16 @@ import {
 
 const OFF_SCENE_THOUGHT_PATTERN = /\b(not\s+(currently\s+)?(in|at|present|in\s+the)\s+(the\s+)?(scene|area|room|location|vicinity))\b|\b(off[\s-]?scene)\b|\b(not\s+present)\b|\b(absent)\b|\b(away\s+from\s+(the\s+)?scene)\b/i;
 const CHAT_CHANGE_RETRY_DELAYS = [0, 80, 220, 500];
-const SYNC_DEBOUNCE_DELAY = 80;
-const EXPRESSION_SYNC_CACHE_VERSION = 1;
-const EXPRESSION_SYNC_CACHE_FIELD = 'expressionSync';
+const REFRESH_DEBOUNCE_DELAY = 80;
+const THOUGHT_BASED_EXPRESSIONS_CACHE_VERSION = 1;
+const THOUGHT_BASED_EXPRESSIONS_CACHE_FIELD = 'thoughtBasedExpressions';
 
 let hiddenExpressionStyleElement = null;
-let refreshExpressionConsumersHandler = null;
-let scheduledSyncTimer = null;
-let activeSyncRunId = 0;
-let lastCompletedSyncSignature = null;
-let lastExpressionsSettingsSignature = null;
+let thoughtBasedExpressionsRefreshHandler = null;
+let scheduledRefreshTimer = null;
+let activeRefreshRunId = 0;
+let lastCompletedRefreshSignature = null;
+let lastExpressionSettingsSignature = null;
 
 function normalizeName(name) {
     return String(name || '').trim().toLowerCase();
@@ -54,14 +54,14 @@ function shouldHideNativeExpressionDisplay() {
     return extensionSettings.enabled === true && extensionSettings.hideDefaultExpressionDisplay === true;
 }
 
-function shouldSyncExpressionPortraits() {
+function shouldUseThoughtBasedExpressions() {
     return extensionSettings.enabled === true
-        && extensionSettings.syncExpressionsToPresentCharacters === true
+        && extensionSettings.enableThoughtBasedExpressions === true
         && extensionSettings.showAlternatePresentCharactersPanel === true;
 }
 
-function refreshExpressionConsumers() {
-    refreshExpressionConsumersHandler?.();
+function notifyThoughtBasedExpressionsConsumers() {
+    thoughtBasedExpressionsRefreshHandler?.();
 }
 
 function getHideStyleCss() {
@@ -109,7 +109,7 @@ function showNativeExpressionDisplay() {
     hiddenExpressionStyleElement = null;
 }
 
-function syncNativeExpressionDisplayVisibility() {
+function updateNativeExpressionDisplayVisibility() {
     if (shouldHideNativeExpressionDisplay()) {
         hideNativeExpressionDisplay();
     } else {
@@ -117,10 +117,10 @@ function syncNativeExpressionDisplayVisibility() {
     }
 }
 
-function clearScheduledSync() {
-    if (scheduledSyncTimer !== null) {
-        clearTimeout(scheduledSyncTimer);
-        scheduledSyncTimer = null;
+function clearScheduledRefresh() {
+    if (scheduledRefreshTimer !== null) {
+        clearTimeout(scheduledRefreshTimer);
+        scheduledRefreshTimer = null;
     }
 }
 
@@ -176,25 +176,25 @@ function arePortraitMapsEqual(left, right) {
     return leftKeys.every(key => left[key] === right[key]);
 }
 
-function applySyncedExpressionPortraits(nextPortraits) {
-    if (arePortraitMapsEqual(syncedExpressionPortraits, nextPortraits)) {
+function applyThoughtBasedExpressionPortraits(nextPortraits) {
+    if (arePortraitMapsEqual(thoughtBasedExpressionPortraits, nextPortraits)) {
         return false;
     }
 
-    setSyncedExpressionPortraits(nextPortraits);
+    setThoughtBasedExpressionPortraits(nextPortraits);
     return true;
 }
 
-function purgeInvalidSyncedExpressionPortraits() {
+function purgeInvalidThoughtBasedExpressionPortraits() {
     const nextPortraits = {};
 
-    for (const [characterName, src] of Object.entries(syncedExpressionPortraits)) {
-        if (isUsableExpressionSrc(src)) {
+    for (const [characterName, src] of Object.entries(thoughtBasedExpressionPortraits)) {
+        if (isUsableThoughtBasedExpressionSrc(src)) {
             nextPortraits[characterName] = src;
         }
     }
 
-    return applySyncedExpressionPortraits(nextPortraits);
+    return applyThoughtBasedExpressionPortraits(nextPortraits);
 }
 
 function getMessageThoughtPayload(message) {
@@ -242,24 +242,28 @@ function findThoughtSourceMessageInfo(characterThoughtsData) {
     return currentThoughts ? null : fallback;
 }
 
-function getSwipeExpressionSyncCache(sourceInfo) {
-    const cache = sourceInfo?.swipeData?.[EXPRESSION_SYNC_CACHE_FIELD];
-    if (!cache || typeof cache !== 'object' || Array.isArray(cache)) {
-        return null;
-    }
-
-    if (cache.version !== EXPRESSION_SYNC_CACHE_VERSION) {
-        return null;
-    }
-
-    return cache;
+function isThoughtBasedExpressionsCache(candidate) {
+    return !!(
+        candidate
+        && typeof candidate === 'object'
+        && !Array.isArray(candidate)
+        && candidate.version === THOUGHT_BASED_EXPRESSIONS_CACHE_VERSION
+        && candidate.entries
+        && typeof candidate.entries === 'object'
+        && !Array.isArray(candidate.entries)
+    );
 }
 
-function areExpressionSyncCachesEqual(left, right) {
+function getSwipeThoughtBasedExpressionsCache(sourceInfo) {
+    const directCache = sourceInfo?.swipeData?.[THOUGHT_BASED_EXPRESSIONS_CACHE_FIELD];
+    return isThoughtBasedExpressionsCache(directCache) ? directCache : null;
+}
+
+function areThoughtBasedExpressionsCachesEqual(left, right) {
     return stableStringify(left) === stableStringify(right);
 }
 
-function getThoughtSyncEntries(characterThoughtsData) {
+function getThoughtBasedExpressionEntries(characterThoughtsData) {
     const thoughtsConfig = extensionSettings.trackerConfig?.presentCharacters?.thoughts;
     if (thoughtsConfig?.enabled === false) {
         return [];
@@ -278,7 +282,7 @@ function getThoughtSyncEntries(characterThoughtsData) {
         .filter(character => character.name && character.thought && !OFF_SCENE_THOUGHT_PATTERN.test(character.thought));
 }
 
-function buildSyncSignature(thoughtEntries, expressionsSettingsSignature) {
+function buildRefreshSignature(thoughtEntries, expressionsSettingsSignature) {
     return JSON.stringify({
         expressionsSettingsSignature,
         thoughtEntries: thoughtEntries.map(entry => ({
@@ -289,53 +293,53 @@ function buildSyncSignature(thoughtEntries, expressionsSettingsSignature) {
     });
 }
 
-async function syncExpressionsFromThoughts({ force = false } = {}) {
-    syncNativeExpressionDisplayVisibility();
+async function refreshThoughtBasedExpressions({ force = false } = {}) {
+    updateNativeExpressionDisplayVisibility();
 
     if (!extensionSettings.enabled) {
         showNativeExpressionDisplay();
         return;
     }
 
-    if (!shouldSyncExpressionPortraits()) {
+    if (!shouldUseThoughtBasedExpressions()) {
         return;
     }
 
     if (!isExpressionsExtensionEnabled()) {
-        lastCompletedSyncSignature = null;
-        lastExpressionsSettingsSignature = null;
+        lastCompletedRefreshSignature = null;
+        lastExpressionSettingsSignature = null;
         clearExpressionsCompatibilityCache();
-        const portraitsChanged = applySyncedExpressionPortraits({});
+        const portraitsChanged = applyThoughtBasedExpressionPortraits({});
         if (portraitsChanged) {
             saveChatData();
         }
-        refreshExpressionConsumers();
+        notifyThoughtBasedExpressionsConsumers();
         return;
     }
 
     const expressionsSettingsSignature = getExpressionsSettingsSignature();
-    if (expressionsSettingsSignature !== lastExpressionsSettingsSignature) {
+    if (expressionsSettingsSignature !== lastExpressionSettingsSignature) {
         clearExpressionsCompatibilityCache();
-        lastExpressionsSettingsSignature = expressionsSettingsSignature;
-        lastCompletedSyncSignature = null;
+        lastExpressionSettingsSignature = expressionsSettingsSignature;
+        lastCompletedRefreshSignature = null;
     }
 
     const characterThoughtsData = getPresentCharactersTrackerData({ useCommittedFallback: true });
-    const thoughtEntries = getThoughtSyncEntries(characterThoughtsData);
-    const syncSignature = buildSyncSignature(thoughtEntries, expressionsSettingsSignature);
-    if (!force && syncSignature === lastCompletedSyncSignature) {
+    const thoughtEntries = getThoughtBasedExpressionEntries(characterThoughtsData);
+    const refreshSignature = buildRefreshSignature(thoughtEntries, expressionsSettingsSignature);
+    if (!force && refreshSignature === lastCompletedRefreshSignature) {
         return;
     }
 
     const sourceInfo = findThoughtSourceMessageInfo(characterThoughtsData);
-    const cachedSyncData = getSwipeExpressionSyncCache(sourceInfo);
-    const cachedEntries = cachedSyncData?.entries && typeof cachedSyncData.entries === 'object' && !Array.isArray(cachedSyncData.entries)
-        ? cachedSyncData.entries
+    const cachedThoughtBasedExpressions = getSwipeThoughtBasedExpressionsCache(sourceInfo);
+    const cachedEntries = cachedThoughtBasedExpressions?.entries && typeof cachedThoughtBasedExpressions.entries === 'object' && !Array.isArray(cachedThoughtBasedExpressions.entries)
+        ? cachedThoughtBasedExpressions.entries
         : {};
     const currentThoughtsSignature = normalizeThoughtPayload(characterThoughtsData);
     const classificationSettingsSignature = getExpressionClassificationSettingsSignature();
     const portraitSettingsSignature = getExpressionPortraitSettingsSignature();
-    const runId = ++activeSyncRunId;
+    const runId = ++activeRefreshRunId;
     const nextPortraits = {};
     const nextCacheEntries = {};
 
@@ -349,7 +353,7 @@ async function syncExpressionsFromThoughts({ force = false } = {}) {
         const cachedEntry = cachedEntries[portraitKey] && typeof cachedEntries[portraitKey] === 'object'
             ? cachedEntries[portraitKey]
             : null;
-        const previousSrc = nextPortraits[portraitKey] || syncedExpressionPortraits[portraitKey] || null;
+        const previousSrc = nextPortraits[portraitKey] || thoughtBasedExpressionPortraits[portraitKey] || null;
         const canReuseExpression = cachedEntry
             && cachedEntry.thought === entry.thought
             && cachedEntry.classificationSettingsSignature === classificationSettingsSignature
@@ -359,7 +363,7 @@ async function syncExpressionsFromThoughts({ force = false } = {}) {
         const expression = canReuseExpression
             ? normalizeExpressionLabel(cachedEntry.expression)
             : normalizeExpressionLabel(await classifyExpressionText(entry.thought, { characterName: entry.name }));
-        if (runId !== activeSyncRunId) {
+        if (runId !== activeRefreshRunId) {
             return;
         }
 
@@ -371,13 +375,13 @@ async function syncExpressionsFromThoughts({ force = false } = {}) {
             && cachedEntry.portraitResolved === true;
 
         const portraitSrc = canReusePortrait
-            ? (isUsableExpressionSrc(cachedEntry.portraitSrc) ? cachedEntry.portraitSrc : null)
+            ? (isUsableThoughtBasedExpressionSrc(cachedEntry.portraitSrc) ? cachedEntry.portraitSrc : null)
             : await resolveExpressionPortraitForCharacter(entry.name, expression, { previousSrc });
-        if (runId !== activeSyncRunId) {
+        if (runId !== activeRefreshRunId) {
             return;
         }
 
-        if (isUsableExpressionSrc(portraitSrc)) {
+        if (isUsableThoughtBasedExpressionSrc(portraitSrc)) {
             nextPortraits[portraitKey] = portraitSrc;
         }
 
@@ -388,159 +392,159 @@ async function syncExpressionsFromThoughts({ force = false } = {}) {
             classificationSettingsSignature,
             portraitSettingsSignature,
             expression,
-            portraitSrc: isUsableExpressionSrc(portraitSrc) ? portraitSrc : null,
+            portraitSrc: isUsableThoughtBasedExpressionSrc(portraitSrc) ? portraitSrc : null,
             portraitResolved: true
         };
     }
 
-    if (runId !== activeSyncRunId) {
+    if (runId !== activeRefreshRunId) {
         return;
     }
 
     let cacheChanged = false;
     if (sourceInfo) {
         const nextCache = {
-            version: EXPRESSION_SYNC_CACHE_VERSION,
+            version: THOUGHT_BASED_EXPRESSIONS_CACHE_VERSION,
             thoughtsSignature: currentThoughtsSignature,
             entries: nextCacheEntries
         };
 
-        if (!areExpressionSyncCachesEqual(cachedSyncData, nextCache)) {
-            setMessageSwipeTrackerField(sourceInfo.message, sourceInfo.swipeId, EXPRESSION_SYNC_CACHE_FIELD, nextCache);
+        if (!areThoughtBasedExpressionsCachesEqual(cachedThoughtBasedExpressions, nextCache)) {
+            setMessageSwipeTrackerField(sourceInfo.message, sourceInfo.swipeId, THOUGHT_BASED_EXPRESSIONS_CACHE_FIELD, nextCache);
             cacheChanged = true;
         }
     }
 
-    lastCompletedSyncSignature = syncSignature;
-    const portraitsChanged = applySyncedExpressionPortraits(nextPortraits);
+    lastCompletedRefreshSignature = refreshSignature;
+    const portraitsChanged = applyThoughtBasedExpressionPortraits(nextPortraits);
     if (portraitsChanged || cacheChanged) {
         saveChatData();
     }
     if (portraitsChanged) {
-        refreshExpressionConsumers();
+        notifyThoughtBasedExpressionsConsumers();
     }
 }
 
-export function setExpressionSyncRefreshHandler(handler) {
-    refreshExpressionConsumersHandler = typeof handler === 'function' ? handler : null;
+export function setThoughtBasedExpressionsRefreshHandler(handler) {
+    thoughtBasedExpressionsRefreshHandler = typeof handler === 'function' ? handler : null;
 }
 
-export function queueExpressionSyncFromThoughts({ immediate = false, force = false } = {}) {
-    clearScheduledSync();
+export function queueThoughtBasedExpressionsUpdate({ immediate = false, force = false } = {}) {
+    clearScheduledRefresh();
 
-    const runSync = () => {
-        syncExpressionsFromThoughts({ force }).catch(error => {
-            console.warn('[RPG Companion] Thoughts-driven expression sync failed:', error);
+    const runRefresh = () => {
+        refreshThoughtBasedExpressions({ force }).catch(error => {
+            console.warn('[RPG Companion] Thought-based expressions update failed:', error);
         });
     };
 
     if (immediate) {
-        runSync();
+        runRefresh();
         return;
     }
 
-    scheduledSyncTimer = setTimeout(() => {
-        scheduledSyncTimer = null;
-        runSync();
-    }, SYNC_DEBOUNCE_DELAY);
+    scheduledRefreshTimer = setTimeout(() => {
+        scheduledRefreshTimer = null;
+        runRefresh();
+    }, REFRESH_DEBOUNCE_DELAY);
 }
 
-export function initExpressionSync() {
-    const purged = purgeInvalidSyncedExpressionPortraits();
-    syncNativeExpressionDisplayVisibility();
+export function initThoughtBasedExpressions() {
+    const purged = purgeInvalidThoughtBasedExpressionPortraits();
+    updateNativeExpressionDisplayVisibility();
 
     if (purged) {
         saveChatData();
-        refreshExpressionConsumers();
+        notifyThoughtBasedExpressionsConsumers();
     }
 
-    if (shouldSyncExpressionPortraits()) {
-        queueExpressionSyncFromThoughts({ immediate: true, force: true });
+    if (shouldUseThoughtBasedExpressions()) {
+        queueThoughtBasedExpressionsUpdate({ immediate: true, force: true });
     }
 }
 
-export function onExpressionSyncChatChanged() {
+export function onThoughtBasedExpressionsChatChanged() {
     if (!extensionSettings.enabled) {
         showNativeExpressionDisplay();
         return;
     }
 
-    clearScheduledSync();
-    activeSyncRunId += 1;
-    lastCompletedSyncSignature = null;
-    lastExpressionsSettingsSignature = null;
+    clearScheduledRefresh();
+    activeRefreshRunId += 1;
+    lastCompletedRefreshSignature = null;
+    lastExpressionSettingsSignature = null;
     clearExpressionsCompatibilityCache();
 
-    const purged = purgeInvalidSyncedExpressionPortraits();
+    const purged = purgeInvalidThoughtBasedExpressionPortraits();
     if (purged) {
         saveChatData();
-        refreshExpressionConsumers();
+        notifyThoughtBasedExpressionsConsumers();
     }
 
     for (const delay of CHAT_CHANGE_RETRY_DELAYS) {
         setTimeout(() => {
-            syncNativeExpressionDisplayVisibility();
-            if (shouldSyncExpressionPortraits()) {
-                queueExpressionSyncFromThoughts({ immediate: true, force: true });
+            updateNativeExpressionDisplayVisibility();
+            if (shouldUseThoughtBasedExpressions()) {
+                queueThoughtBasedExpressionsUpdate({ immediate: true, force: true });
             } else {
-                refreshExpressionConsumers();
+                notifyThoughtBasedExpressionsConsumers();
             }
         }, delay);
     }
 }
 
-export function onExpressionSyncSettingChanged(enabled) {
-    syncNativeExpressionDisplayVisibility();
+export function onThoughtBasedExpressionsSettingChanged(enabled) {
+    updateNativeExpressionDisplayVisibility();
 
     if (enabled) {
-        const purged = purgeInvalidSyncedExpressionPortraits();
+        const purged = purgeInvalidThoughtBasedExpressionPortraits();
         if (purged) {
             saveChatData();
-            refreshExpressionConsumers();
+            notifyThoughtBasedExpressionsConsumers();
         }
 
-        if (shouldSyncExpressionPortraits()) {
-            queueExpressionSyncFromThoughts({ immediate: true, force: true });
+        if (shouldUseThoughtBasedExpressions()) {
+            queueThoughtBasedExpressionsUpdate({ immediate: true, force: true });
         } else {
-            refreshExpressionConsumers();
+            notifyThoughtBasedExpressionsConsumers();
         }
         return;
     }
 
-    clearScheduledSync();
-    activeSyncRunId += 1;
-    lastCompletedSyncSignature = null;
-    lastExpressionsSettingsSignature = null;
+    clearScheduledRefresh();
+    activeRefreshRunId += 1;
+    lastCompletedRefreshSignature = null;
+    lastExpressionSettingsSignature = null;
     clearExpressionsCompatibilityCache();
-    refreshExpressionConsumers();
+    notifyThoughtBasedExpressionsConsumers();
 }
 
 export function onAlternatePresentCharactersVisibilityChanged() {
-    syncNativeExpressionDisplayVisibility();
+    updateNativeExpressionDisplayVisibility();
 
-    if (shouldSyncExpressionPortraits()) {
-        queueExpressionSyncFromThoughts({ immediate: true, force: true });
+    if (shouldUseThoughtBasedExpressions()) {
+        queueThoughtBasedExpressionsUpdate({ immediate: true, force: true });
         return;
     }
 
-    clearScheduledSync();
-    activeSyncRunId += 1;
-    lastCompletedSyncSignature = null;
-    lastExpressionsSettingsSignature = null;
+    clearScheduledRefresh();
+    activeRefreshRunId += 1;
+    lastCompletedRefreshSignature = null;
+    lastExpressionSettingsSignature = null;
 }
 
 export function onHideDefaultExpressionDisplaySettingChanged(enabled) {
     extensionSettings.hideDefaultExpressionDisplay = enabled === true;
-    syncNativeExpressionDisplayVisibility();
-    setTimeout(() => syncNativeExpressionDisplayVisibility(), 0);
-    setTimeout(() => syncNativeExpressionDisplayVisibility(), 120);
+    updateNativeExpressionDisplayVisibility();
+    setTimeout(() => updateNativeExpressionDisplayVisibility(), 0);
+    setTimeout(() => updateNativeExpressionDisplayVisibility(), 120);
 }
 
-export function clearExpressionSyncCache() {
-    clearScheduledSync();
-    activeSyncRunId += 1;
-    lastCompletedSyncSignature = null;
-    lastExpressionsSettingsSignature = null;
+export function clearThoughtBasedExpressionsCache() {
+    clearScheduledRefresh();
+    activeRefreshRunId += 1;
+    lastCompletedRefreshSignature = null;
+    lastExpressionSettingsSignature = null;
     clearExpressionsCompatibilityCache();
     showNativeExpressionDisplay();
 }

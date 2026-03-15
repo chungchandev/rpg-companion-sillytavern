@@ -19,7 +19,7 @@ export let extensionSettings = {
     showInfoBox: true,
     showCharacterThoughts: true,
     showAlternatePresentCharactersPanel: false,
-    syncExpressionsToPresentCharacters: false,
+    enableThoughtBasedExpressions: false,
     hideDefaultExpressionDisplay: false,
     showInventory: true, // Show inventory section (v2 system)
     showQuests: true, // Show quests section
@@ -364,37 +364,21 @@ export function clearSessionAvatarPrompts() {
 }
 
 /**
- * Per-chat storage for thoughts-synced Character Expressions portraits.
+ * Per-chat storage for thought-based Character Expressions portraits.
  * Maps normalized character names to the current below-chat portrait URL.
  */
-export let syncedExpressionPortraits = {};
+export let thoughtBasedExpressionPortraits = {};
 
-export function setSyncedExpressionPortrait(characterName, src) {
-    if (!characterName || !src) {
-        return;
-    }
-
-    syncedExpressionPortraits[characterName] = src;
+export function setThoughtBasedExpressionPortraits(portraits) {
+    thoughtBasedExpressionPortraits = portraits && typeof portraits === 'object' ? { ...portraits } : {};
 }
 
-export function removeSyncedExpressionPortrait(characterName) {
-    if (!characterName) {
-        return;
-    }
-
-    delete syncedExpressionPortraits[characterName];
+export function getThoughtBasedExpressionPortrait(characterName) {
+    return thoughtBasedExpressionPortraits[characterName] || null;
 }
 
-export function setSyncedExpressionPortraits(portraits) {
-    syncedExpressionPortraits = portraits && typeof portraits === 'object' ? { ...portraits } : {};
-}
-
-export function getSyncedExpressionPortrait(characterName) {
-    return syncedExpressionPortraits[characterName] || null;
-}
-
-export function clearSyncedExpressionPortraits() {
-    syncedExpressionPortraits = {};
+export function clearThoughtBasedExpressionPortraits() {
+    thoughtBasedExpressionPortraits = {};
 }
 
 /**
