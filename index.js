@@ -139,6 +139,7 @@ import {
     initExpressionSync,
     queueExpressionCaptureForSpeaker,
     onExpressionSyncSettingChanged,
+    onAlternatePresentCharactersVisibilityChanged,
     onHideDefaultExpressionDisplaySettingChanged,
     clearExpressionSyncCache,
     onExpressionSyncChatChanged
@@ -358,6 +359,7 @@ async function initUI() {
         extensionSettings.showAlternatePresentCharactersPanel = $(this).prop('checked');
         saveSettings();
         renderThoughts();
+        onAlternatePresentCharactersVisibilityChanged();
     });
 
     $('#rpg-toggle-sync-expressions').on('change', function() {

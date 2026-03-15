@@ -51,6 +51,8 @@
     "template.settingsModal.display.showLockIconsNote": "Afficher les icônes de verrouillage/déverrouillage sur les éléments de suivi pour empêcher l'IA de les modifier.",
     "template.settingsModal.display.showThoughtsInChat": "Afficher Pensées",
     "template.settingsModal.display.showThoughtsInChatNote": "Afficher les pensées des personnages sous forme de bulles superposées à côté de leurs messages.",
+    "template.settingsModal.display.showInlineThoughts": "Afficher les pensées sous le texte du message",
+    "template.settingsModal.display.showInlineThoughtsNote": "Basculer entre les bulles de pensée dans le coin par défaut et des cartes de pensée sous le texte du message.",
     "template.settingsModal.display.alwaysShowThoughtBubble": "Toujours Afficher Bulle Pensée",
     "template.settingsModal.display.alwaysShowThoughtBubbleNote": "Développer automatiquement la bulle de pensée sans cliquer sur l'icône d'abord",
     "template.settingsModal.display.enableAnimations": "Activer Animations",

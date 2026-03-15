@@ -139,11 +139,14 @@ function shouldHideNativeExpressionDisplay() {
     return extensionSettings.enabled === true && extensionSettings.hideDefaultExpressionDisplay === true;
 }
 
+function shouldSyncExpressionPortraits() {
+    return extensionSettings.enabled === true
+        && extensionSettings.syncExpressionsToPresentCharacters === true
+        && extensionSettings.showAlternatePresentCharactersPanel === true;
+}
+
 function shouldRunExpressionObservers() {
-    return extensionSettings.enabled === true && (
-        extensionSettings.syncExpressionsToPresentCharacters === true
-        || extensionSettings.hideDefaultExpressionDisplay === true
-    );
+    return shouldSyncExpressionPortraits() || shouldHideNativeExpressionDisplay();
 }
 
 function isExpressionContainerNode(node) {
@@ -392,8 +395,17 @@ function teardownExpressionObservers() {
     observedExpressionImage = null;
 }
 
+function resetPendingExpressionCaptureState() {
+    clearScheduledCaptures();
+    pendingCaptureRequestId += 1;
+    pendingSpeakerName = null;
+    pendingSpeakerBaselineSignature = null;
+    pendingSpeakerQueuedAt = 0;
+    lastCapturedExpressionSrc = null;
+}
+
 function captureExpressionForSpeaker(speakerName, expectedRequestId = null) {
-    if (!extensionSettings.enabled || !extensionSettings.syncExpressionsToPresentCharacters) {
+    if (!shouldSyncExpressionPortraits()) {
         return false;
     }
     if (expectedRequestId !== null && expectedRequestId !== pendingCaptureRequestId) {
@@ -466,7 +478,8 @@ function ensureExpressionObservers() {
 
     if (!shouldRunExpressionObservers()) {
         teardownExpressionObservers();
-        return;
+        resetPendingExpressionCaptureState();
+        return false;
     }
 
     const currentImg = findExpressionImageElement(pendingSpeakerName);
@@ -506,6 +519,8 @@ function ensureExpressionObservers() {
         childList: true,
         subtree: true
     });
+
+    return true;
 }
 
 function clearScheduledCaptures() {
@@ -517,7 +532,7 @@ function clearScheduledCaptures() {
 }
 
 export function queueExpressionCaptureForSpeaker(speakerName) {
-    if (!extensionSettings.enabled || !extensionSettings.syncExpressionsToPresentCharacters) {
+    if (!shouldSyncExpressionPortraits()) {
         return;
     }
 
@@ -543,7 +558,7 @@ export function queueExpressionCaptureForSpeaker(speakerName) {
 }
 
 export function syncExpressionFromLatestMessage() {
-    if (!extensionSettings.enabled || !extensionSettings.syncExpressionsToPresentCharacters) {
+    if (!shouldSyncExpressionPortraits()) {
         return;
     }
 
@@ -557,7 +572,7 @@ export function initExpressionSync() {
 
     ensureExpressionObservers();
 
-    if (extensionSettings.syncExpressionsToPresentCharacters) {
+    if (shouldSyncExpressionPortraits()) {
         syncExpressionFromLatestMessage();
     }
 }
@@ -578,7 +593,7 @@ export function onExpressionSyncChatChanged() {
         setTimeout(() => {
             ensureExpressionObservers();
             syncNativeExpressionDisplayVisibility();
-            if (extensionSettings.syncExpressionsToPresentCharacters) {
+            if (shouldSyncExpressionPortraits()) {
                 syncExpressionFromLatestMessage();
             } else {
                 refreshExpressionConsumers();
@@ -594,18 +609,31 @@ export function onExpressionSyncSettingChanged(enabled) {
         if (!purged) {
             refreshExpressionConsumers();
         }
+        if (shouldSyncExpressionPortraits()) {
+            syncExpressionFromLatestMessage();
+        }
+        return;
+    }
+
+    const observersActive = ensureExpressionObservers();
+    if (observersActive) {
+        resetPendingExpressionCaptureState();
+    }
+    refreshExpressionConsumers();
+}
+
+export function onAlternatePresentCharactersVisibilityChanged() {
+    const shouldSyncPortraits = shouldSyncExpressionPortraits();
+    const observersActive = ensureExpressionObservers();
+
+    if (shouldSyncPortraits) {
         syncExpressionFromLatestMessage();
         return;
     }
 
-    ensureExpressionObservers();
-    clearScheduledCaptures();
-    pendingCaptureRequestId += 1;
-    pendingSpeakerName = null;
-    pendingSpeakerBaselineSignature = null;
-    pendingSpeakerQueuedAt = 0;
-    lastCapturedExpressionSrc = null;
-    refreshExpressionConsumers();
+    if (observersActive) {
+        resetPendingExpressionCaptureState();
+    }
 }
 
 export function onHideDefaultExpressionDisplaySettingChanged(enabled) {
@@ -617,12 +645,7 @@ export function onHideDefaultExpressionDisplaySettingChanged(enabled) {
 }
 
 export function clearExpressionSyncCache() {
-    clearScheduledCaptures();
-    pendingCaptureRequestId += 1;
-    pendingSpeakerName = null;
-    pendingSpeakerBaselineSignature = null;
-    pendingSpeakerQueuedAt = 0;
-    lastCapturedExpressionSrc = null;
+    resetPendingExpressionCaptureState();
     teardownExpressionObservers();
     showNativeExpressionDisplay();
 }
