@@ -7,6 +7,7 @@ import {
     normalizeImageSrc,
     resolveImageUrl
 } from './imageUrls.js';
+import { isExpressionsExtensionEnabled } from './sillyTavernExpressions.js';
 
 function normalizeName(name) {
     return String(name || '').trim().toLowerCase();
@@ -40,11 +41,6 @@ export function isUsableExpressionSrc(src) {
         return false;
     }
 
-    const lower = normalized.toLowerCase();
-    if (lower.includes('/img/default-expressions/') || lower.includes('/default-expressions/')) {
-        return false;
-    }
-
     if (isDocumentLikeUrl(normalized)) {
         return false;
     }
@@ -53,6 +49,10 @@ export function isUsableExpressionSrc(src) {
 }
 
 export function getExpressionPortraitForCharacter(characterName) {
+    if (!isExpressionsExtensionEnabled()) {
+        return null;
+    }
+
     const target = normalizeName(characterName);
     if (!target) {
         return null;

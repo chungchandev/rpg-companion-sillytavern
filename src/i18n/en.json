@@ -37,7 +37,7 @@
     "template.settingsModal.display.showBelowChatPresentCharacters": "Show Below-Chat Present Characters",
     "template.settingsModal.display.showBelowChatPresentCharactersNote": "Display a compact Present Characters panel below the chat.",
     "template.settingsModal.display.syncBelowChatPresentCharactersExpressions": "Sync Expressions in Below-Chat Panel",
-    "template.settingsModal.display.syncBelowChatPresentCharactersExpressionsNote": "Use each character's current SillyTavern expression portrait in the below-chat Present Characters panel.",
+    "template.settingsModal.display.syncBelowChatPresentCharactersExpressionsNote": "Use SillyTavern Character Expressions to classify each present character's thoughts for the below-chat panel. If Character Expressions uses Main API with Full Context, this may increase token usage.",
     "template.settingsModal.display.hideDefaultExpressionDisplay": "Hide Default Expression Display",
     "template.settingsModal.display.hideDefaultExpressionDisplayNote": "Hide SillyTavern's built-in Character Expressions display.",
     "template.settingsModal.display.narratorMode": "Narrator Mode",

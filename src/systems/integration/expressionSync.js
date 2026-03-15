@@ -1,84 +1,53 @@
 /**
  * Character Expressions -> below-chat Present Characters portrait sync.
  *
- * Mirrors SillyTavern's currently displayed Character Expressions image into
- * the alternate Present Characters panel, persisting the last known
- * expression for each character until they speak again.
+ * Derives expression portraits from the current Present Characters thoughts
+ * payload, while keeping SillyTavern's native Character Expressions widget
+ * independent from the below-chat panel.
  */
 
-import { chat } from '../../../../../../../script.js';
+import { getContext } from '../../../../../../extensions.js';
 import {
     extensionSettings,
     syncedExpressionPortraits,
-    setSyncedExpressionPortrait,
-    removeSyncedExpressionPortrait
+    setSyncedExpressionPortraits
 } from '../../core/state.js';
-import { saveChatData } from '../../core/persistence.js';
-import { normalizeImageSrc } from '../../utils/imageUrls.js';
+import {
+    getCurrentMessageSwipeTrackerData,
+    saveChatData,
+    setMessageSwipeTrackerField
+} from '../../core/persistence.js';
 import { isUsableExpressionSrc } from '../../utils/expressionPortraits.js';
+import {
+    getPresentCharactersTrackerData,
+    parsePresentCharacters
+} from '../../utils/presentCharacters.js';
+import {
+    classifyExpressionText,
+    clearExpressionsCompatibilityCache,
+    getExpressionClassificationSettingsSignature,
+    getExpressionPortraitSettingsSignature,
+    getExpressionsSettingsSignature,
+    isExpressionsExtensionEnabled,
+    resolveSpriteFolderNameForCharacter,
+    resolveExpressionPortraitForCharacter
+} from '../../utils/sillyTavernExpressions.js';
 
-let expressionContainerObserver = null;
-let expressionImageObserver = null;
-let observedExpressionImage = null;
-let pendingSpeakerName = null;
-let pendingSpeakerBaselineSignature = null;
-let pendingSpeakerQueuedAt = 0;
-let lastCapturedExpressionSrc = null;
-let scheduledCaptureTimers = [];
+const OFF_SCENE_THOUGHT_PATTERN = /\b(not\s+(currently\s+)?(in|at|present|in\s+the)\s+(the\s+)?(scene|area|room|location|vicinity))\b|\b(off[\s-]?scene)\b|\b(not\s+present)\b|\b(absent)\b|\b(away\s+from\s+(the\s+)?scene)\b/i;
+const CHAT_CHANGE_RETRY_DELAYS = [0, 80, 220, 500];
+const SYNC_DEBOUNCE_DELAY = 80;
+const EXPRESSION_SYNC_CACHE_VERSION = 1;
+const EXPRESSION_SYNC_CACHE_FIELD = 'expressionSync';
+
 let hiddenExpressionStyleElement = null;
-let pendingCaptureRequestId = 0;
 let refreshExpressionConsumersHandler = null;
+let scheduledSyncTimer = null;
+let activeSyncRunId = 0;
+let lastCompletedSyncSignature = null;
+let lastExpressionsSettingsSignature = null;
 
 function normalizeName(name) {
     return String(name || '').trim().toLowerCase();
-}
-
-function namesMatch(a, b) {
-    const left = normalizeName(a);
-    const right = normalizeName(b);
-    if (!left || !right) {
-        return false;
-    }
-
-    return left === right || left.startsWith(right + ' ') || right.startsWith(left + ' ');
-}
-
-function normalizeExpressionSrc(src) {
-    return normalizeImageSrc(src);
-}
-
-function purgeInvalidSyncedExpressionPortraits() {
-    let changed = false;
-
-    for (const [storedName, src] of Object.entries(syncedExpressionPortraits)) {
-        if (!isUsableExpressionSrc(src)) {
-            removeSyncedExpressionPortrait(storedName);
-            changed = true;
-        }
-    }
-
-    if (changed) {
-        saveChatData();
-    }
-
-    return changed;
-}
-
-export function setExpressionSyncRefreshHandler(handler) {
-    refreshExpressionConsumersHandler = typeof handler === 'function' ? handler : null;
-}
-
-function getLatestAssistantSpeakerName() {
-    for (let i = chat.length - 1; i >= 0; i--) {
-        const message = chat[i];
-        if (!message || message.is_user || message.is_system) {
-            continue;
-        }
-
-        return message.name || null;
-    }
-
-    return null;
 }
 
 function shouldHideNativeExpressionDisplay() {
@@ -89,185 +58,6 @@ function shouldSyncExpressionPortraits() {
     return extensionSettings.enabled === true
         && extensionSettings.syncExpressionsToPresentCharacters === true
         && extensionSettings.showAlternatePresentCharactersPanel === true;
-}
-
-function shouldRunExpressionObservers() {
-    return shouldSyncExpressionPortraits() || shouldHideNativeExpressionDisplay();
-}
-
-function isExpressionContainerNode(node) {
-    if (!(node instanceof Element)) {
-        return false;
-    }
-
-    return !!node.closest('#expression-wrapper, #expression-holder, .expression-holder, [data-expression-container], #visual-novel-wrapper');
-}
-
-function getExpressionImageState(img) {
-    if (!(img instanceof HTMLImageElement)) {
-        return null;
-    }
-
-    const rawSrc = normalizeExpressionSrc(img.getAttribute('src'));
-    const resolvedSrc = normalizeExpressionSrc(img.currentSrc || img.src || '');
-    const src = rawSrc || '';
-    const spriteFolderName = String(img.getAttribute('data-sprite-folder-name') || '').trim();
-    const spriteFileName = String(img.getAttribute('data-sprite-filename') || '').trim();
-    const expression = String(img.getAttribute('data-expression') || img.getAttribute('title') || '').trim();
-    const isDefault = img.classList.contains('default')
-        || rawSrc.toLowerCase().includes('/img/default-expressions/')
-        || resolvedSrc.toLowerCase().includes('/img/default-expressions/');
-
-    return {
-        src,
-        resolvedSrc,
-        spriteFolderName,
-        spriteFileName,
-        expression,
-        isDefault,
-        signature: JSON.stringify({
-            src,
-            resolvedSrc,
-            spriteFolderName,
-            spriteFileName,
-            expression,
-            isDefault
-        })
-    };
-}
-
-function hasMeaningfulMetadataValue(value) {
-    const normalized = String(value || '').trim().toLowerCase();
-    return Boolean(normalized && normalized !== 'null' && normalized !== 'undefined');
-}
-
-function looksLikeFallbackExpressionAsset(state) {
-    if (!state) {
-        return true;
-    }
-
-    const combined = [state.src, state.spriteFolderName, state.spriteFileName, state.expression]
-        .map(value => String(value || '').trim().toLowerCase())
-        .join(' ');
-
-    return [
-        '/img/default-expressions/',
-        '/default-expressions/',
-        '/emote/',
-        '/emotes/',
-        '/emoji/',
-        '/emotion/',
-        '/emotions/',
-        ' default ',
-        ' fallback ',
-        ' placeholder '
-    ].some(fragment => combined.includes(fragment.trim()));
-}
-
-function hasRealSyncedSprite(state) {
-    if (!state) {
-        return false;
-    }
-    if (!state.src || state.isDefault) {
-        return false;
-    }
-    if (!isUsableExpressionSrc(state.src)) {
-        return false;
-    }
-    if (!hasMeaningfulMetadataValue(state.spriteFolderName)) {
-        return false;
-    }
-    if (!hasMeaningfulMetadataValue(state.spriteFileName)) {
-        return false;
-    }
-    if (!hasMeaningfulMetadataValue(state.expression)) {
-        return false;
-    }
-    if (looksLikeFallbackExpressionAsset(state)) {
-        return false;
-    }
-
-    return true;
-}
-
-function isProbablyExpressionImage(img) {
-    if (!(img instanceof HTMLImageElement)) {
-        return false;
-    }
-
-    const state = getExpressionImageState(img);
-    if (!state?.src) {
-        return false;
-    }
-
-    const hasExpressionClass = img.classList.contains('expression') || img.id === 'expression-image';
-    const hasExpressionMetadata = Boolean(state.expression || state.spriteFolderName || state.spriteFileName);
-
-    if (!hasExpressionClass && !hasExpressionMetadata && !isExpressionContainerNode(img)) {
-        return false;
-    }
-
-    return true;
-}
-
-function getPreferredVisualNovelImage(speakerName) {
-    const target = normalizeName(speakerName);
-    const candidates = Array.from(document.querySelectorAll('#visual-novel-wrapper .expression-holder img'))
-        .filter(node => isProbablyExpressionImage(node) && hasRealSyncedSprite(getExpressionImageState(node)));
-
-    if (!candidates.length) {
-        return null;
-    }
-    if (!target) {
-        return candidates.find(node => node.offsetParent !== null) || candidates[0] || null;
-    }
-
-    const exactMatch = candidates.find(node => {
-        const state = getExpressionImageState(node);
-        const folderRoot = String(state?.spriteFolderName || '').split('/')[0];
-        return namesMatch(folderRoot, target);
-    });
-    if (exactMatch) {
-        return exactMatch;
-    }
-
-    return candidates.find(node => node.offsetParent !== null) || candidates[0] || null;
-}
-
-function findExpressionImageElement(speakerName = null) {
-    if (observedExpressionImage && observedExpressionImage.isConnected && isProbablyExpressionImage(observedExpressionImage)) {
-        return observedExpressionImage;
-    }
-
-    const preferredSelectors = [
-        '#expression-wrapper img.expression',
-        '#expression-holder > img.expression',
-        '#expression-image'
-    ];
-
-    for (const selector of preferredSelectors) {
-        const nodes = Array.from(document.querySelectorAll(selector));
-        const visibleMatch = nodes.find(node => isProbablyExpressionImage(node)
-            && hasRealSyncedSprite(getExpressionImageState(node))
-            && node.offsetParent !== null);
-        if (visibleMatch) {
-            return visibleMatch;
-        }
-
-        const anyRealMatch = nodes.find(node =>
-            isProbablyExpressionImage(node) && hasRealSyncedSprite(getExpressionImageState(node)));
-        if (anyRealMatch) {
-            return anyRealMatch;
-        }
-    }
-
-    const visualNovelMatch = getPreferredVisualNovelImage(speakerName);
-    if (visualNovelMatch) {
-        return visualNovelMatch;
-    }
-
-    const allImages = Array.from(document.querySelectorAll('img.expression, #visual-novel-wrapper .expression-holder img'));
-    return allImages.find(node => isProbablyExpressionImage(node) && hasRealSyncedSprite(getExpressionImageState(node))) || null;
 }
 
 function refreshExpressionConsumers() {
@@ -327,199 +117,345 @@ function syncNativeExpressionDisplayVisibility() {
     }
 }
 
-function teardownExpressionObservers() {
-    if (expressionContainerObserver) {
-        expressionContainerObserver.disconnect();
-        expressionContainerObserver = null;
+function clearScheduledSync() {
+    if (scheduledSyncTimer !== null) {
+        clearTimeout(scheduledSyncTimer);
+        scheduledSyncTimer = null;
     }
-
-    if (expressionImageObserver) {
-        expressionImageObserver.disconnect();
-        expressionImageObserver = null;
-    }
-
-    observedExpressionImage = null;
 }
 
-function resetPendingExpressionCaptureState() {
-    clearScheduledCaptures();
-    pendingCaptureRequestId += 1;
-    pendingSpeakerName = null;
-    pendingSpeakerBaselineSignature = null;
-    pendingSpeakerQueuedAt = 0;
-    lastCapturedExpressionSrc = null;
+function stableStringify(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(item => stableStringify(item)).join(',')}]`;
+    }
+
+    if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+    }
+
+    return JSON.stringify(value);
 }
 
-function captureExpressionForSpeaker(speakerName, expectedRequestId = null) {
-    if (!shouldSyncExpressionPortraits()) {
+function normalizeThoughtPayload(payload) {
+    if (!payload) {
+        return null;
+    }
+
+    if (typeof payload === 'object') {
+        return stableStringify(payload);
+    }
+
+    if (typeof payload !== 'string') {
+        return String(payload);
+    }
+
+    const trimmed = payload.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    try {
+        return stableStringify(JSON.parse(trimmed));
+    } catch {
+        return trimmed.replace(/\r\n/g, '\n');
+    }
+}
+
+function normalizeExpressionLabel(label) {
+    return String(label || '').trim().toLowerCase();
+}
+
+function arePortraitMapsEqual(left, right) {
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+
+    if (leftKeys.length !== rightKeys.length) {
         return false;
     }
-    if (expectedRequestId !== null && expectedRequestId !== pendingCaptureRequestId) {
+
+    return leftKeys.every(key => left[key] === right[key]);
+}
+
+function applySyncedExpressionPortraits(nextPortraits) {
+    if (arePortraitMapsEqual(syncedExpressionPortraits, nextPortraits)) {
         return false;
     }
 
-    const name = normalizeName(speakerName || pendingSpeakerName || getLatestAssistantSpeakerName());
-    if (!name) {
-        return false;
-    }
-
-    const previous = getSyncedExpressionPortrait(name);
-    const img = findExpressionImageElement(name);
-    const state = getExpressionImageState(img);
-    if (!hasRealSyncedSprite(state)) {
-        const elapsed = pendingSpeakerQueuedAt ? (Date.now() - pendingSpeakerQueuedAt) : 0;
-        if (previous && elapsed >= 1200) {
-            removeSyncedExpressionPortrait(name);
-            saveChatData();
-            refreshExpressionConsumers();
-        }
-        return false;
-    }
-
-    pendingSpeakerName = name;
-
-    // After a speaker switch, SillyTavern may briefly keep showing the previous
-    // speaker's expression. Wait for the widget to actually change before storing.
-    if (pendingSpeakerBaselineSignature && state.signature === pendingSpeakerBaselineSignature && previous !== state.src) {
-        return false;
-    }
-
-    if (previous === state.src && lastCapturedExpressionSrc === state.src) {
-        return true;
-    }
-
-    lastCapturedExpressionSrc = state.src;
-    pendingSpeakerBaselineSignature = null;
-    setSyncedExpressionPortrait(name, state.src);
-    saveChatData();
-    refreshExpressionConsumers();
+    setSyncedExpressionPortraits(nextPortraits);
     return true;
 }
 
-function observeExpressionImage(img) {
-    if (!shouldRunExpressionObservers()) {
-        return;
-    }
-    if (!img || observedExpressionImage === img) {
-        return;
-    }
+function purgeInvalidSyncedExpressionPortraits() {
+    const nextPortraits = {};
 
-    if (expressionImageObserver) {
-        expressionImageObserver.disconnect();
+    for (const [characterName, src] of Object.entries(syncedExpressionPortraits)) {
+        if (isUsableExpressionSrc(src)) {
+            nextPortraits[characterName] = src;
+        }
     }
 
-    observedExpressionImage = img;
-    expressionImageObserver = new MutationObserver(() => {
-        captureExpressionForSpeaker(pendingSpeakerName, pendingCaptureRequestId);
-    });
+    return applySyncedExpressionPortraits(nextPortraits);
+}
 
-    expressionImageObserver.observe(img, {
-        attributes: true,
-        attributeFilter: ['src', 'class', 'style', 'title', 'data-expression', 'data-sprite-folder-name', 'data-sprite-filename']
+function getMessageThoughtPayload(message) {
+    if (!message || message.is_user) {
+        return null;
+    }
+
+    const swipeData = getCurrentMessageSwipeTrackerData(message);
+    return normalizeThoughtPayload(swipeData?.characterThoughts ?? null);
+}
+
+function findThoughtSourceMessageInfo(characterThoughtsData) {
+    const chatMessages = getContext()?.chat || [];
+    const currentThoughts = normalizeThoughtPayload(characterThoughtsData);
+    let fallback = null;
+
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+        const message = chatMessages[i];
+        if (!message || message.is_user || message.is_system) {
+            continue;
+        }
+
+        const swipeData = getCurrentMessageSwipeTrackerData(message);
+        if (!swipeData) {
+            continue;
+        }
+
+        const sourceInfo = {
+            message,
+            messageIndex: i,
+            swipeId: Number(message.swipe_id ?? 0),
+            swipeData
+        };
+
+        if (!fallback) {
+            fallback = sourceInfo;
+        }
+
+        const messageThoughts = getMessageThoughtPayload(message);
+        if (currentThoughts && messageThoughts === currentThoughts) {
+            return sourceInfo;
+        }
+    }
+
+    return currentThoughts ? null : fallback;
+}
+
+function getSwipeExpressionSyncCache(sourceInfo) {
+    const cache = sourceInfo?.swipeData?.[EXPRESSION_SYNC_CACHE_FIELD];
+    if (!cache || typeof cache !== 'object' || Array.isArray(cache)) {
+        return null;
+    }
+
+    if (cache.version !== EXPRESSION_SYNC_CACHE_VERSION) {
+        return null;
+    }
+
+    return cache;
+}
+
+function areExpressionSyncCachesEqual(left, right) {
+    return stableStringify(left) === stableStringify(right);
+}
+
+function getThoughtSyncEntries(characterThoughtsData) {
+    const thoughtsConfig = extensionSettings.trackerConfig?.presentCharacters?.thoughts;
+    if (thoughtsConfig?.enabled === false) {
+        return [];
+    }
+
+    if (!characterThoughtsData) {
+        return [];
+    }
+
+    const presentCharacters = parsePresentCharacters(characterThoughtsData);
+    return presentCharacters
+        .map(character => ({
+            name: String(character?.name || '').trim(),
+            thought: String(character?.ThoughtsContent || '').trim()
+        }))
+        .filter(character => character.name && character.thought && !OFF_SCENE_THOUGHT_PATTERN.test(character.thought));
+}
+
+function buildSyncSignature(thoughtEntries, expressionsSettingsSignature) {
+    return JSON.stringify({
+        expressionsSettingsSignature,
+        thoughtEntries: thoughtEntries.map(entry => ({
+            name: normalizeName(entry.name),
+            thought: entry.thought,
+            spriteFolderName: resolveSpriteFolderNameForCharacter(entry.name)
+        }))
     });
 }
 
-function ensureExpressionObservers() {
+async function syncExpressionsFromThoughts({ force = false } = {}) {
     syncNativeExpressionDisplayVisibility();
 
-    if (!shouldRunExpressionObservers()) {
-        teardownExpressionObservers();
-        resetPendingExpressionCaptureState();
-        return false;
-    }
-
-    const currentImg = findExpressionImageElement(pendingSpeakerName);
-    if (currentImg) {
-        observeExpressionImage(currentImg);
-    } else if (expressionImageObserver) {
-        expressionImageObserver.disconnect();
-        expressionImageObserver = null;
-        observedExpressionImage = null;
-    }
-
-    if (expressionContainerObserver) {
+    if (!extensionSettings.enabled) {
+        showNativeExpressionDisplay();
         return;
     }
 
-    expressionContainerObserver = new MutationObserver(() => {
-        if (!shouldRunExpressionObservers()) {
-            teardownExpressionObservers();
-            syncNativeExpressionDisplayVisibility();
+    if (!shouldSyncExpressionPortraits()) {
+        return;
+    }
+
+    if (!isExpressionsExtensionEnabled()) {
+        lastCompletedSyncSignature = null;
+        lastExpressionsSettingsSignature = null;
+        clearExpressionsCompatibilityCache();
+        const portraitsChanged = applySyncedExpressionPortraits({});
+        if (portraitsChanged) {
+            saveChatData();
+        }
+        refreshExpressionConsumers();
+        return;
+    }
+
+    const expressionsSettingsSignature = getExpressionsSettingsSignature();
+    if (expressionsSettingsSignature !== lastExpressionsSettingsSignature) {
+        clearExpressionsCompatibilityCache();
+        lastExpressionsSettingsSignature = expressionsSettingsSignature;
+        lastCompletedSyncSignature = null;
+    }
+
+    const characterThoughtsData = getPresentCharactersTrackerData({ useCommittedFallback: true });
+    const thoughtEntries = getThoughtSyncEntries(characterThoughtsData);
+    const syncSignature = buildSyncSignature(thoughtEntries, expressionsSettingsSignature);
+    if (!force && syncSignature === lastCompletedSyncSignature) {
+        return;
+    }
+
+    const sourceInfo = findThoughtSourceMessageInfo(characterThoughtsData);
+    const cachedSyncData = getSwipeExpressionSyncCache(sourceInfo);
+    const cachedEntries = cachedSyncData?.entries && typeof cachedSyncData.entries === 'object' && !Array.isArray(cachedSyncData.entries)
+        ? cachedSyncData.entries
+        : {};
+    const currentThoughtsSignature = normalizeThoughtPayload(characterThoughtsData);
+    const classificationSettingsSignature = getExpressionClassificationSettingsSignature();
+    const portraitSettingsSignature = getExpressionPortraitSettingsSignature();
+    const runId = ++activeSyncRunId;
+    const nextPortraits = {};
+    const nextCacheEntries = {};
+
+    for (const entry of thoughtEntries) {
+        const portraitKey = normalizeName(entry.name);
+        if (!portraitKey) {
+            continue;
+        }
+
+        const spriteFolderName = resolveSpriteFolderNameForCharacter(entry.name);
+        const cachedEntry = cachedEntries[portraitKey] && typeof cachedEntries[portraitKey] === 'object'
+            ? cachedEntries[portraitKey]
+            : null;
+        const previousSrc = nextPortraits[portraitKey] || syncedExpressionPortraits[portraitKey] || null;
+        const canReuseExpression = cachedEntry
+            && cachedEntry.thought === entry.thought
+            && cachedEntry.classificationSettingsSignature === classificationSettingsSignature
+            && cachedEntry.spriteFolderName === spriteFolderName
+            && typeof cachedEntry.expression === 'string';
+
+        const expression = canReuseExpression
+            ? normalizeExpressionLabel(cachedEntry.expression)
+            : normalizeExpressionLabel(await classifyExpressionText(entry.thought, { characterName: entry.name }));
+        if (runId !== activeSyncRunId) {
             return;
         }
 
-        const img = findExpressionImageElement(pendingSpeakerName);
-        if (img) {
-            observeExpressionImage(img);
-            captureExpressionForSpeaker(pendingSpeakerName, pendingCaptureRequestId);
-        } else if (expressionImageObserver) {
-            expressionImageObserver.disconnect();
-            expressionImageObserver = null;
-            observedExpressionImage = null;
+        const canReusePortrait = cachedEntry
+            && cachedEntry.thought === entry.thought
+            && cachedEntry.expression === expression
+            && cachedEntry.portraitSettingsSignature === portraitSettingsSignature
+            && cachedEntry.spriteFolderName === spriteFolderName
+            && cachedEntry.portraitResolved === true;
+
+        const portraitSrc = canReusePortrait
+            ? (isUsableExpressionSrc(cachedEntry.portraitSrc) ? cachedEntry.portraitSrc : null)
+            : await resolveExpressionPortraitForCharacter(entry.name, expression, { previousSrc });
+        if (runId !== activeSyncRunId) {
+            return;
         }
 
-        syncNativeExpressionDisplayVisibility();
-    });
+        if (isUsableExpressionSrc(portraitSrc)) {
+            nextPortraits[portraitKey] = portraitSrc;
+        }
 
-    expressionContainerObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-
-    return true;
-}
-
-function clearScheduledCaptures() {
-    for (const timer of scheduledCaptureTimers) {
-        clearTimeout(timer);
+        nextCacheEntries[portraitKey] = {
+            name: entry.name,
+            thought: entry.thought,
+            spriteFolderName,
+            classificationSettingsSignature,
+            portraitSettingsSignature,
+            expression,
+            portraitSrc: isUsableExpressionSrc(portraitSrc) ? portraitSrc : null,
+            portraitResolved: true
+        };
     }
 
-    scheduledCaptureTimers = [];
-}
-
-export function queueExpressionCaptureForSpeaker(speakerName) {
-    if (!shouldSyncExpressionPortraits()) {
+    if (runId !== activeSyncRunId) {
         return;
     }
 
-    pendingSpeakerName = normalizeName(speakerName || getLatestAssistantSpeakerName());
-    if (!pendingSpeakerName) {
-        return;
+    let cacheChanged = false;
+    if (sourceInfo) {
+        const nextCache = {
+            version: EXPRESSION_SYNC_CACHE_VERSION,
+            thoughtsSignature: currentThoughtsSignature,
+            entries: nextCacheEntries
+        };
+
+        if (!areExpressionSyncCachesEqual(cachedSyncData, nextCache)) {
+            setMessageSwipeTrackerField(sourceInfo.message, sourceInfo.swipeId, EXPRESSION_SYNC_CACHE_FIELD, nextCache);
+            cacheChanged = true;
+        }
     }
 
-    const currentImg = findExpressionImageElement(pendingSpeakerName);
-    const currentState = getExpressionImageState(currentImg);
-    pendingSpeakerBaselineSignature = currentState?.signature || null;
-    pendingSpeakerQueuedAt = Date.now();
-    pendingCaptureRequestId += 1;
-    const requestId = pendingCaptureRequestId;
-
-    ensureExpressionObservers();
-    clearScheduledCaptures();
-
-    for (const delay of [50, 200, 500, 900, 1500, 2200]) {
-        const timer = setTimeout(() => captureExpressionForSpeaker(pendingSpeakerName, requestId), delay);
-        scheduledCaptureTimers.push(timer);
+    lastCompletedSyncSignature = syncSignature;
+    const portraitsChanged = applySyncedExpressionPortraits(nextPortraits);
+    if (portraitsChanged || cacheChanged) {
+        saveChatData();
+    }
+    if (portraitsChanged) {
+        refreshExpressionConsumers();
     }
 }
 
-export function syncExpressionFromLatestMessage() {
-    if (!shouldSyncExpressionPortraits()) {
+export function setExpressionSyncRefreshHandler(handler) {
+    refreshExpressionConsumersHandler = typeof handler === 'function' ? handler : null;
+}
+
+export function queueExpressionSyncFromThoughts({ immediate = false, force = false } = {}) {
+    clearScheduledSync();
+
+    const runSync = () => {
+        syncExpressionsFromThoughts({ force }).catch(error => {
+            console.warn('[RPG Companion] Thoughts-driven expression sync failed:', error);
+        });
+    };
+
+    if (immediate) {
+        runSync();
         return;
     }
 
-    queueExpressionCaptureForSpeaker(getLatestAssistantSpeakerName());
+    scheduledSyncTimer = setTimeout(() => {
+        scheduledSyncTimer = null;
+        runSync();
+    }, SYNC_DEBOUNCE_DELAY);
 }
 
 export function initExpressionSync() {
-    if (purgeInvalidSyncedExpressionPortraits()) {
+    const purged = purgeInvalidSyncedExpressionPortraits();
+    syncNativeExpressionDisplayVisibility();
+
+    if (purged) {
+        saveChatData();
         refreshExpressionConsumers();
     }
 
-    ensureExpressionObservers();
-
     if (shouldSyncExpressionPortraits()) {
-        syncExpressionFromLatestMessage();
+        queueExpressionSyncFromThoughts({ immediate: true, force: true });
     }
 }
 
@@ -529,18 +465,23 @@ export function onExpressionSyncChatChanged() {
         return;
     }
 
+    clearScheduledSync();
+    activeSyncRunId += 1;
+    lastCompletedSyncSignature = null;
+    lastExpressionsSettingsSignature = null;
+    clearExpressionsCompatibilityCache();
+
     const purged = purgeInvalidSyncedExpressionPortraits();
     if (purged) {
+        saveChatData();
         refreshExpressionConsumers();
     }
 
-    const retryDelays = [0, 80, 220, 500];
-    for (const delay of retryDelays) {
+    for (const delay of CHAT_CHANGE_RETRY_DELAYS) {
         setTimeout(() => {
-            ensureExpressionObservers();
             syncNativeExpressionDisplayVisibility();
             if (shouldSyncExpressionPortraits()) {
-                syncExpressionFromLatestMessage();
+                queueExpressionSyncFromThoughts({ immediate: true, force: true });
             } else {
                 refreshExpressionConsumers();
             }
@@ -549,49 +490,57 @@ export function onExpressionSyncChatChanged() {
 }
 
 export function onExpressionSyncSettingChanged(enabled) {
+    syncNativeExpressionDisplayVisibility();
+
     if (enabled) {
         const purged = purgeInvalidSyncedExpressionPortraits();
-        initExpressionSync();
-        if (!purged) {
+        if (purged) {
+            saveChatData();
             refreshExpressionConsumers();
         }
+
         if (shouldSyncExpressionPortraits()) {
-            syncExpressionFromLatestMessage();
+            queueExpressionSyncFromThoughts({ immediate: true, force: true });
+        } else {
+            refreshExpressionConsumers();
         }
         return;
     }
 
-    const observersActive = ensureExpressionObservers();
-    if (observersActive) {
-        resetPendingExpressionCaptureState();
-    }
+    clearScheduledSync();
+    activeSyncRunId += 1;
+    lastCompletedSyncSignature = null;
+    lastExpressionsSettingsSignature = null;
+    clearExpressionsCompatibilityCache();
     refreshExpressionConsumers();
 }
 
 export function onAlternatePresentCharactersVisibilityChanged() {
-    const shouldSyncPortraits = shouldSyncExpressionPortraits();
-    const observersActive = ensureExpressionObservers();
+    syncNativeExpressionDisplayVisibility();
 
-    if (shouldSyncPortraits) {
-        syncExpressionFromLatestMessage();
+    if (shouldSyncExpressionPortraits()) {
+        queueExpressionSyncFromThoughts({ immediate: true, force: true });
         return;
     }
 
-    if (observersActive) {
-        resetPendingExpressionCaptureState();
-    }
+    clearScheduledSync();
+    activeSyncRunId += 1;
+    lastCompletedSyncSignature = null;
+    lastExpressionsSettingsSignature = null;
 }
 
 export function onHideDefaultExpressionDisplaySettingChanged(enabled) {
     extensionSettings.hideDefaultExpressionDisplay = enabled === true;
-    ensureExpressionObservers();
     syncNativeExpressionDisplayVisibility();
     setTimeout(() => syncNativeExpressionDisplayVisibility(), 0);
     setTimeout(() => syncNativeExpressionDisplayVisibility(), 120);
 }
 
 export function clearExpressionSyncCache() {
-    resetPendingExpressionCaptureState();
-    teardownExpressionObservers();
+    clearScheduledSync();
+    activeSyncRunId += 1;
+    lastCompletedSyncSignature = null;
+    lastExpressionsSettingsSignature = null;
+    clearExpressionsCompatibilityCache();
     showNativeExpressionDisplay();
 }

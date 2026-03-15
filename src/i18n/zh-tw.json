@@ -33,7 +33,7 @@
     "template.settingsModal.display.showBelowChatPresentCharacters": "顯示聊天下方的在場角色",
     "template.settingsModal.display.showBelowChatPresentCharactersNote": "在聊天下方顯示精簡的在場角色面板。",
     "template.settingsModal.display.syncBelowChatPresentCharactersExpressions": "在聊天下方面板同步表情",
-    "template.settingsModal.display.syncBelowChatPresentCharactersExpressionsNote": "在聊天下方的在場角色面板中，使用每個角色目前的 SillyTavern 表情頭像。",
+    "template.settingsModal.display.syncBelowChatPresentCharactersExpressionsNote": "使用 SillyTavern Character Expressions 對聊天下方面板中每個在場角色的想法進行分類。如果 Character Expressions 使用 Main API + Full Context，可能會增加 token 使用量。",
     "template.settingsModal.display.hideDefaultExpressionDisplay": "隱藏預設表情顯示",
     "template.settingsModal.display.hideDefaultExpressionDisplayNote": "隱藏 SillyTavern 內建的角色表情顯示。",
     "template.settingsModal.display.showInventory": "顯示物品欄",

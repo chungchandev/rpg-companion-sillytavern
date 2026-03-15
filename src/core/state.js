@@ -364,8 +364,8 @@ export function clearSessionAvatarPrompts() {
 }
 
 /**
- * Per-chat storage for synced Character Expressions portraits.
- * Maps normalized character names to the last captured expression image URL.
+ * Per-chat storage for thoughts-synced Character Expressions portraits.
+ * Maps normalized character names to the current below-chat portrait URL.
  */
 export let syncedExpressionPortraits = {};
 

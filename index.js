@@ -140,7 +140,7 @@ import {
 } from './src/systems/ui/alternatePresentCharacters.js';
 import {
     initExpressionSync,
-    queueExpressionCaptureForSpeaker,
+    queueExpressionSyncFromThoughts,
     onExpressionSyncSettingChanged,
     onAlternatePresentCharactersVisibilityChanged,
     onHideDefaultExpressionDisplaySettingChanged,
@@ -1425,7 +1425,7 @@ jQuery(async () => {
 
                 const renderedMessage = chat[messageId];
                 if (renderedMessage && !renderedMessage.is_user && !renderedMessage.is_system) {
-                    queueExpressionCaptureForSpeaker(renderedMessage.name);
+                    queueExpressionSyncFromThoughts();
                 }
             });
 
@@ -1436,7 +1436,7 @@ jQuery(async () => {
 
                 const updatedMessage = chat[messageId];
                 if (updatedMessage && !updatedMessage.is_user && !updatedMessage.is_system) {
-                    queueExpressionCaptureForSpeaker(updatedMessage.name);
+                    queueExpressionSyncFromThoughts();
                 }
             });
 
@@ -1447,7 +1447,7 @@ jQuery(async () => {
 
                 const swipedMessage = chat[messageIndex];
                 if (swipedMessage && !swipedMessage.is_user && !swipedMessage.is_system) {
-                    queueExpressionCaptureForSpeaker(swipedMessage.name);
+                    queueExpressionSyncFromThoughts({ immediate: true });
                 }
             });
 

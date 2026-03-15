@@ -37,7 +37,7 @@
     "template.settingsModal.display.showBelowChatPresentCharacters": "Показывать персонажей под чатом",
     "template.settingsModal.display.showBelowChatPresentCharactersNote": "Показывать компактную панель персонажей под чатом.",
     "template.settingsModal.display.syncBelowChatPresentCharactersExpressions": "Синхронизировать выражения в панели под чатом",
-    "template.settingsModal.display.syncBelowChatPresentCharactersExpressionsNote": "Использовать текущий портрет выражения SillyTavern каждого персонажа в панели «Присутствующие персонажи» под чатом.",
+    "template.settingsModal.display.syncBelowChatPresentCharactersExpressionsNote": "Использовать Character Expressions в SillyTavern для классификации мыслей каждого присутствующего персонажа в панели под чатом. Если Character Expressions использует Main API с Full Context, расход token-ов может вырасти.",
     "template.settingsModal.display.hideDefaultExpressionDisplay": "Скрыть отображение выражений по умолчанию",
     "template.settingsModal.display.hideDefaultExpressionDisplayNote": "Скрыть встроенное отображение выражений персонажей SillyTavern.",
     "template.settingsModal.display.narratorMode": "Режим расказчика",

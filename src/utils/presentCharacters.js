@@ -135,6 +135,7 @@ export function parsePresentCharacters(characterThoughtsData, { enabledFields = 
 
     const lines = characterThoughtsData.split('\n');
     let currentCharacter = null;
+    const thoughtsLabel = extensionSettings.trackerConfig?.presentCharacters?.thoughts?.name || 'Thoughts';
 
     for (const line of lines) {
         if (!line.trim()
@@ -178,6 +179,8 @@ export function parsePresentCharacters(characterThoughtsData, { enabledFields = 
                     currentCharacter[statMatch[1].trim()] = parseInt(statMatch[2], 10);
                 }
             }
+        } else if (line.trim().startsWith(thoughtsLabel + ':') && currentCharacter) {
+            currentCharacter.ThoughtsContent = line.substring(line.indexOf(':') + 1).trim();
         }
     }
 
