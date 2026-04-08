@@ -37,9 +37,9 @@ export const DEFAULT_DECEPTION_PROMPT = `When a character is lying or deceiving,
  * Default Omniscience Filter prompt text
  * This instructs the AI to separate information the player character cannot perceive
  */
-export const DEFAULT_OMNISCIENCE_FILTER_PROMPT = `You must strictly separate what the player can directly perceive from what they cannot. They should only read limited narrative content that their persona can actually see, hear, smell, touch, or otherwise directly sense. Before writing any narrative content that involves events, actions, or details the player directly cannot perceive (because they're not looking, too far away, behind them, in another room, happening silently, include NPCs' internal thoughts, etc.), you absolutely must output that hidden information inside a <filter> tag using this exact format:
-<filter event="[Brief description of what is happening that the player cannot perceive]" reason="[Why the player character cannot perceive this - e.g., 'behind them', 'in another room', 'too quiet to hear', 'focused elsewhere']"/>
-Example: <filter event="Zandik quietly takes the key from the table and slips out the back door" reason="Zandik is behind Mari, who is absorbed in reading, and he moves silently"/> You hear a faint click from somewhere behind you, but when you glance up from your newspaper, the room seems unchanged.`;
+export const DEFAULT_OMNISCIENCE_FILTER_PROMPT = `You must strictly separate what the player can directly perceive from what they cannot. They should only read limited narrative content that their persona can actually see, hear, smell, touch, or otherwise directly sense. Before writing any narrative content that involves events, actions, or details the player directly cannot perceive (because they're not looking, too far away, behind them, in another room, happening silently, include NPCs' internal thoughts, etc.), you absolutely must output that hidden information inside a <ofilter> tag using this exact format:
+<ofilter event="[Brief description of what is happening that the player cannot perceive]" reason="[Why the player character cannot perceive this - e.g., 'behind them', 'in another room', 'too quiet to hear', 'focused elsewhere']"/>
+Example: <ofilter event="Zandik quietly takes the key from the table and slips out the back door" reason="Zandik is behind Mari, who is absorbed in reading, and he moves silently"/> You hear a faint click from somewhere behind you, but when you glance up from your newspaper, the room seems unchanged.`;
 
 
 /**

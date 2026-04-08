@@ -359,7 +359,7 @@
     "template.promptsEditor.deceptionPrompt.title": "Deception System Prompt",
     "template.promptsEditor.deceptionPrompt.note": "Injected when \"Enable Deception System\" is enabled. Instructs AI to mark lies and deceptions with hidden tags.",
     "template.promptsEditor.omnisciencePrompt.title": "Omniscience Filter Prompt",
-    "template.promptsEditor.omnisciencePrompt.note": "Injected when \"Enable Omniscience Filter\" is enabled. Instructs AI to separate information the player character cannot perceive into hidden filter tags.",
+    "template.promptsEditor.omnisciencePrompt.note": "Injected when \"Enable Omniscience Filter\" is enabled. Instructs AI to separate information the player character cannot perceive into hidden <ofilter> tags.",
     "template.promptsEditor.cyoaPrompt.title": "CYOA Prompt",
     "template.promptsEditor.cyoaPrompt.note": "Injected when \"Enable CYOA\" is enabled. Instructs AI to end responses with numbered action choices. Uses very high priority (depth 102) to ensure it's the last instruction.",
     "template.promptsEditor.spotifyPrompt.title": "Spotify Music Prompt",

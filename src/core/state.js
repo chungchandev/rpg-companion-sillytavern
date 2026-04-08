@@ -30,7 +30,7 @@ export let extensionSettings = {
     customDialogueColoringPrompt: '', // Custom dialogue coloring prompt text (empty = use default)
     enableDeceptionSystem: false, // Enable deception tracking with <lie> tags
     customDeceptionPrompt: '', // Custom deception prompt text (empty = use default)
-    enableOmniscienceFilter: false, // Enable omniscience filter with <filter> tags
+    enableOmniscienceFilter: false, // Enable omniscience filter with <ofilter> tags
     customOmnisciencePrompt: '', // Custom omniscience filter prompt text (empty = use default)
     enableCYOA: false, // Enable "Choose Your Own Adventure" formatting with action choices
     customCYOAPrompt: '', // Custom CYOA prompt text (empty = use default)
