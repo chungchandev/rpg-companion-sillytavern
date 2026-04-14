@@ -1486,6 +1486,15 @@ jQuery(async () => {
                 clearThoughtBasedExpressionsCache();
                 setTimeout(() => onThoughtBasedExpressionsChatChanged(), 0);
             });
+
+            eventSource.on(event_types.MESSAGE_SWIPE_DELETED, () => {
+                if (!extensionSettings.enabled) {
+                    return;
+                }
+
+                clearThoughtBasedExpressionsCache();
+                setTimeout(() => onThoughtBasedExpressionsChatChanged(), 0);
+            });
         } catch (error) {
             console.error('[RPG Companion] Event registration failed:', error);
             throw error; // This is critical - can't continue without events
