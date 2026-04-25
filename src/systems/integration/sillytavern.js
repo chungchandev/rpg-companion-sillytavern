@@ -231,6 +231,38 @@ function getCurrentSwipeText(message) {
     return typeof message?.mes === 'string' ? message.mes : '';
 }
 
+/**
+ * Resolves the currently active swipe index for a message.
+ * Some ST flows can briefly expose a stale message.swipe_id during swipe transitions,
+ * so we also match against message.mes in the swipes array when possible.
+ *
+ * @param {Object} message - Assistant message object
+ * @returns {number} Active swipe index
+ */
+function resolveActiveSwipeId(message) {
+    const fallbackSwipeId = Number(message?.swipe_id ?? 0);
+    const swipes = Array.isArray(message?.swipes) ? message.swipes : null;
+
+    if (!swipes || swipes.length === 0) {
+        return Math.max(0, fallbackSwipeId);
+    }
+
+    const currentText = typeof message?.mes === 'string' ? message.mes : '';
+    if (currentText) {
+        for (let i = swipes.length - 1; i >= 0; i--) {
+            if (typeof swipes[i] === 'string' && swipes[i] === currentText) {
+                return i;
+            }
+        }
+    }
+
+    if (fallbackSwipeId < 0) {
+        return 0;
+    }
+
+    return Math.min(fallbackSwipeId, swipes.length - 1);
+}
+
 function repairLatestTrackerStateFromCurrentSwipeContent(chatMessages = getContext()?.chat || []) {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
         const message = chatMessages[i];
@@ -393,6 +425,7 @@ export function onMessageSent() {
     const chat = context.chat;
     const lastMessage = chat && chat.length > 0 ? chat[chat.length - 1] : null;
 
+
     if (lastMessage && lastMessage.mes === '...') {
         // console.log('[RPG Companion] 🟢 Ignoring onMessageSent: streaming placeholder message');
         return;
@@ -404,6 +437,9 @@ export function onMessageSent() {
     // Set flag to indicate we're expecting a new message from generation
     // This allows auto-update to distinguish between new generations and loading chat history
     setIsAwaitingNewMessage(true);
+
+
+
 
     // Note: FAB spinning is NOT shown for together mode since no extra API request is made
     // The RPG data comes embedded in the main response
@@ -430,6 +466,7 @@ export async function onMessageReceived(data) {
         // Commit happens in onMessageSent (when user sends message, before generation)
         const lastMessage = chat[chat.length - 1];
         if (lastMessage && !lastMessage.is_user) {
+            const rawSwipeId = Number(lastMessage.swipe_id ?? 0);
             const responseText = lastMessage.mes;
             const parsedData = parseResponse(responseText);
 
@@ -471,7 +508,8 @@ export async function onMessageReceived(data) {
                 lastMessage.extra.rpg_companion_swipes = {};
             }
 
-            const currentSwipeId = lastMessage.swipe_id || 0;
+            const currentSwipeId = resolveActiveSwipeId(lastMessage);
+
             setMessageSwipeTrackerData(lastMessage, currentSwipeId, {
                 userStats: parsedData.userStats,
                 infoBox: parsedData.infoBox,
@@ -668,7 +706,7 @@ export function onMessageSwiped(messageIndex) {
         return;
     }
 
-    const currentSwipeId = message.swipe_id || 0;
+    const currentSwipeId = resolveActiveSwipeId(message);
     const swipeCount = Array.isArray(message.swipes) ? message.swipes.length : 0;
 
     // Only set flag to true if this swipe will trigger a NEW generation
@@ -677,7 +715,7 @@ export function onMessageSwiped(messageIndex) {
         message.swipes[currentSwipeId] !== undefined &&
         message.swipes[currentSwipeId] !== null &&
         message.swipes[currentSwipeId].length > 0;
-    const swipeData = getCurrentSwipeTrackerData(message);
+    const swipeData = getSwipeData(message, currentSwipeId);
     const isPendingNewSwipe = currentSwipeId >= swipeCount;
 
     if (!isExistingSwipe) {

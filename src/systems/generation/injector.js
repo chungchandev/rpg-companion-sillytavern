@@ -38,8 +38,9 @@ let currentSuppressionState = false;
 // Type imports
 /** @typedef {import('../../types/inventory.js').InventoryV2} InventoryV2 */
 
-// Track last chat length we committed at to prevent duplicate commits from streaming
-let lastCommittedChatLength = -1;
+// Track the latest user message we committed for to prevent duplicate commits
+// when GENERATION_STARTED can fire multiple times for the same turn.
+let lastCommittedUserMessageSignature = null;
 
 // Store context map for prompt injection (used by event handlers)
 let pendingContextMap = new Map();
@@ -607,66 +608,12 @@ export async function onGenerationStarted(type, data, dryRun) {
     // Ensure checkpoint is applied before generation
     await restoreCheckpointOnLoad();
 
-    const currentChatLength = chat ? chat.length : 0;
-
-    // For TOGETHER mode: Commit when user sends message (before first generation)
-    if (extensionSettings.generationMode === 'together') {
-        // By the time onGenerationStarted fires, ST has already added the placeholder AI message
-        // So we check the second-to-last message to see if user just sent a message
-        const secondToLastMessage = chat && chat.length > 1 ? chat[chat.length - 2] : null;
-        const isUserMessage = secondToLastMessage && secondToLastMessage.is_user;
-
-        // Commit if:
-        // 1. Second-to-last message is from USER (user just sent message)
-        // 2. Not a swipe (lastActionWasSwipe = false)
-        // 3. Haven't already committed for this chat length (prevent streaming duplicates)
-        const shouldCommit = isUserMessage && !lastActionWasSwipe && currentChatLength !== lastCommittedChatLength;
-
-        if (shouldCommit) {
-            // console.log('[RPG Companion] 📝 TOGETHER MODE COMMIT: User sent message - committing from N-1 assistant message');
-            // console.log('[RPG Companion]   Chat length:', currentChatLength, 'Last committed:', lastCommittedChatLength);
-
-            // Commit from the prior assistant message's swipe store (N-1 rule).
-            // currentChatLength - 1 is the new AI placeholder; the function walks backward
-            // past it and the user message to find the previous AI message's tracker state.
-            commitTrackerDataFromPriorMessage(currentChatLength - 1);
-
-            // Track chat length to prevent duplicate commits from streaming
-            lastCommittedChatLength = currentChatLength;
-
-            // console.log('[RPG Companion]   AFTER: committedTrackerData =', {
-            //     userStats: committedTrackerData.userStats ? `${committedTrackerData.userStats.substring(0, 50)}...` : 'null',
-            //     infoBox: committedTrackerData.infoBox ? 'exists' : 'null',
-            //     characterThoughts: committedTrackerData.characterThoughts ? `${committedTrackerData.characterThoughts.substring(0, 100)}...` : 'null'
-            // });
-        } else if (lastActionWasSwipe) {
-            // console.log('[RPG Companion] ⏭️ Skipping commit: swipe (using previous committed data)');
-        } else if (!isUserMessage) {
-            // console.log('[RPG Companion] ⏭️ Skipping commit: second-to-last message is not user message (likely swipe or continuation)');
-        }
-
-        // console.log('[RPG Companion] 📦 TOGETHER MODE: Injecting committed tracker data into prompt');
-        // console.log('[RPG Companion]   committedTrackerData =', {
-        //     userStats: committedTrackerData.userStats ? `${committedTrackerData.userStats.substring(0, 50)}...` : 'null',
-        //     infoBox: committedTrackerData.infoBox ? 'exists' : 'null',
-        //     characterThoughts: committedTrackerData.characterThoughts ? `${committedTrackerData.characterThoughts.substring(0, 100)}...` : 'null'
-        // });
-    }
-
-    // For SEPARATE and EXTERNAL modes: Check if we need to commit extension data
-    // BUT: Only do this for the MAIN generation, not the tracker update generation
-    // If isGenerating is true, this is the tracker update generation (second call), so skip flag logic
-    // console.log('[RPG Companion DEBUG] Before generating:', lastGeneratedData.characterThoughts, ' , committed - ', committedTrackerData.characterThoughts);
-    if ((extensionSettings.generationMode === 'separate' || extensionSettings.generationMode === 'external') && !isGenerating) {
-        if (!lastActionWasSwipe) {
-            // User sent a new message - commit from the prior assistant message's swipe store
-            // (N-1 rule) rather than lastGeneratedData, which may reflect a sibling swipe's
-            // outcome and would poison the context for the new generation.
-            // currentChatLength - 1 is the new AI placeholder; search starts before it.
-            commitTrackerDataFromPriorMessage(currentChatLength - 1);
-        }
-        // If lastActionWasSwipe, context was already committed by commitTrackerDataFromPriorMessage
-        // in onMessageSwiped before generation started.
+    // If this is a new generation (not a swipe and not the tracker update pass),
+    // commit the tracker data from the last assistant message (N-1 rule).
+    // Passing chat.length ensures we start searching backwards from the end of the chat,
+    // correctly finding the latest valid assistant state regardless of where the user message is.
+    if (!lastActionWasSwipe && !isGenerating) {
+        commitTrackerDataFromPriorMessage(chat ? chat.length : 0);
     }
 
     // Use the committed tracker data as source for generation
