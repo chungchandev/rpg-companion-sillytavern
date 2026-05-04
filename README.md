@@ -11,7 +11,7 @@ An immersive RPG extension for browsers that tracks character stats, scene infor
 
 Moving on to developing the Marinara Engine frontend, the extension will now be maintained by the community!
 
-https://github.com/Pasta-Devs/Marinara-Engine
+<https://github.com/Pasta-Devs/Marinara-Engine>
 
 ## 📥 Installation
 
@@ -21,7 +21,7 @@ https://github.com/Pasta-Devs/Marinara-Engine
 
 3. Go to Install extension
 
-4. Copy-paste this link: https://github.com/SpicyMarinara/rpg-companion-sillytavern
+4. Copy-paste this link: <https://github.com/SpicyMarinara/rpg-companion-sillytavern>
 
 5. Press Install for all users/Install just for me
 
@@ -99,11 +99,13 @@ AI: Trackers + Full roleplay response
 ↓ Main chat shows clean roleplay text
 
 Pros:
+
 - Single API call
 - Faster response
 - Simpler setup
 
 Cons:
+
 - Tracker formatting mixed in AI response
 - May affect roleplay quality slightly
 
@@ -127,11 +129,13 @@ AI: Separate call with just the tracker data
 ↓ Context summary injected into the next generation
 
 Pros:
+
 - Clean roleplay responses
 - Better roleplay quality
 - Contextual summary enhances immersion
 
 Cons:
+
 - Extra API call
 - Slightly slower
 
@@ -163,16 +167,19 @@ You can edit most fields by clicking on them:
 Access comprehensive customization through the Tracker Settings button:
 
 **User Stats Configuration:**
+
 - Add/remove custom stats with unique names
 - Configure Status section (mood emoji + custom fields)
 - Configure Skills section with custom skill fields
 - Toggle RPG attributes display
 
 **Info Box Configuration:**
+
 - Enable/disable individual widgets (Date, Weather, Temperature, Time, Location, Recent Events)
 - Choose temperature unit (Celsius/Fahrenheit)
 
 **Present Characters Configuration:**
+
 - Add custom character fields (appearance, action, demeanor, etc.)
 - Configure relationship status options
 - Enable character-specific stats tracking
@@ -199,10 +206,10 @@ This extension detects when a "guided generation" prompt is submitted (for examp
 If you want tracker prompts to apply during a guided generation, run the update via separate generation or temporarily disable guided generation in the other extension.
 
 There is a new setting "Skip Tracker & HTML Injections during Guided Generations" in the RPG Companion settings (Advanced section). It now supports three modes:
+
 - none: never skip (always inject the tracker prompts as usual, default)
 - impersonation: only skip when an impersonation-style guided generation is detected
 - guided: skip whenever a guided `instruct` or `quiet_prompt` generation is detected
-
 
 ## 🎨 Themes
 
@@ -286,4 +293,4 @@ SpicyMarinara, Paperboygold, Munimunigamer, Subarashimo, Lilminzyu, Claude, IDea
 Made with ❤️ by Marinara
 
 PS I'm looking for a job or a sponsor to fund my custom AI frontend, contact me if interested:
-mgrabower97@gmail.com
+[mgrabower97@gmail.com](mailto:mgrabower97@gmail.com)

@@ -10,7 +10,7 @@
  * Extension settings - persisted to SillyTavern settings
  */
 export let extensionSettings = {
-    settingsVersion: 4, // Version number for settings migrations
+    settingsVersion: 5, // Version number for settings migrations
     enabled: true,
     autoUpdate: false,
     updateDepth: 4, // How many messages to include in the context
@@ -108,27 +108,23 @@ export let extensionSettings = {
         stats: { enabled: true },            // All stats as compact numbers
         attributes: { enabled: true }        // Compact RPG attributes display
     },
-    userStats: JSON.stringify({
-        stats: [
-            { id: 'health', name: 'Health', value: 100 },
-            { id: 'satiety', name: 'Satiety', value: 100 },
-            { id: 'energy', name: 'Energy', value: 100 },
-            { id: 'hygiene', name: 'Hygiene', value: 100 },
-            { id: 'arousal', name: 'Arousal', value: 0 }
-        ],
-        status: {
-            mood: '😐',
-            conditions: 'None'
-        },
+    userStats: {
+        health: 100,
+        satiety: 100,
+        energy: 100,
+        hygiene: 100,
+        arousal: 0,
+        mood: '😐',
+        conditions: 'None',
+        skills: [],
         inventory: {
-            onPerson: [],
-            stored: []
-        },
-        quests: {
-            active: [],
-            completed: []
+            version: 2,
+            onPerson: "None",
+            clothing: "None",
+            stored: {},
+            assets: "None"
         }
-    }, null, 2),
+    },
     statNames: {
         health: 'Health',
         satiety: 'Satiety',

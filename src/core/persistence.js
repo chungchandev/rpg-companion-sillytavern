@@ -3,7 +3,7 @@
  * Handles saving/loading extension settings and chat data
  */
 
-import { saveSettingsDebounced, chat_metadata, saveChatDebounced } from '../../../../../../script.js';
+import { saveSettingsDebounced, chat_metadata, saveChatDebounced, getCurrentChatId } from '../../../../../../script.js';
 import { getContext } from '../../../../../extensions.js';
 import {
     extensionSettings,
@@ -23,6 +23,245 @@ import { validateStoredInventory, cleanItemString } from '../utils/security.js';
 import { migrateToV3JSON } from '../utils/jsonMigration.js';
 
 const extensionName = 'third-party/rpg-companion-sillytavern';
+const CURRENT_SETTINGS_VERSION = 5;
+
+const DEFAULT_USER_STATS = {
+    health: 100,
+    satiety: 100,
+    energy: 100,
+    hygiene: 100,
+    arousal: 0,
+    mood: '😐',
+    conditions: 'None',
+    skills: [],
+    inventory: {
+        version: 2,
+        onPerson: "None",
+        clothing: "None",
+        stored: {},
+        assets: "None"
+    }
+};
+
+const DEFAULT_EXTENSION_SETTINGS = cloneSerializable(extensionSettings);
+DEFAULT_EXTENSION_SETTINGS.settingsVersion = CURRENT_SETTINGS_VERSION;
+
+let hasDeferredChatDataSave = false;
+
+function cloneSerializable(value) {
+    if (value === undefined) {
+        return undefined;
+    }
+
+    try {
+        return structuredClone(value);
+    } catch {
+        return JSON.parse(JSON.stringify(value));
+    }
+}
+
+function isPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeWithDefaults(defaultValue, savedValue) {
+    if (savedValue === undefined) {
+        return cloneSerializable(defaultValue);
+    }
+
+    if (isPlainObject(defaultValue) && isPlainObject(savedValue)) {
+        const merged = cloneSerializable(defaultValue);
+        for (const [key, value] of Object.entries(savedValue)) {
+            merged[key] = mergeWithDefaults(defaultValue[key], value);
+        }
+        return merged;
+    }
+
+    return cloneSerializable(savedValue);
+}
+
+function parseMaybeJSON(value) {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
+        return value;
+    }
+
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return value;
+    }
+}
+
+function stringifyInventoryItems(items) {
+    if (typeof items === 'string') {
+        return items.trim() || 'None';
+    }
+
+    if (!Array.isArray(items)) {
+        return 'None';
+    }
+
+    const text = items
+        .map(item => {
+            if (isPlainObject(item) && item.name) {
+                const quantity = Number(item.quantity);
+                return quantity > 1 ? `${quantity}x ${item.name}` : item.name;
+            }
+            return String(item || '').trim();
+        })
+        .filter(Boolean)
+        .join(', ');
+
+    return text || 'None';
+}
+
+function normalizeStoredInventory(stored) {
+    if (!isPlainObject(stored)) {
+        return {};
+    }
+
+    const normalized = {};
+    for (const [location, items] of Object.entries(stored)) {
+        normalized[location] = stringifyInventoryItems(items);
+    }
+    return normalized;
+}
+
+function normalizeInventoryValue(inventory) {
+    const parsedInventory = parseMaybeJSON(inventory);
+
+    if (isPlainObject(parsedInventory) && (
+        Array.isArray(parsedInventory.onPerson)
+        || Array.isArray(parsedInventory.clothing)
+        || Array.isArray(parsedInventory.assets)
+        || isPlainObject(parsedInventory.stored)
+    )) {
+        return {
+            version: 2,
+            onPerson: stringifyInventoryItems(parsedInventory.onPerson),
+            clothing: stringifyInventoryItems(parsedInventory.clothing),
+            stored: normalizeStoredInventory(parsedInventory.stored),
+            assets: stringifyInventoryItems(parsedInventory.assets)
+        };
+    }
+
+    const migrationResult = migrateInventory(parsedInventory);
+    return mergeWithDefaults(DEFAULT_USER_STATS.inventory, migrationResult.inventory);
+}
+
+function normalizeUserStatsValue(userStats) {
+    const parsedStats = parseMaybeJSON(userStats);
+    const normalized = cloneSerializable(DEFAULT_USER_STATS);
+
+    if (!isPlainObject(parsedStats)) {
+        return normalized;
+    }
+
+    if (Array.isArray(parsedStats.stats)) {
+        for (const stat of parsedStats.stats) {
+            if (!stat || typeof stat !== 'object') continue;
+            const id = stat.id || stat.name?.toLowerCase?.();
+            if (id && stat.value !== undefined) {
+                normalized[id] = stat.value;
+            }
+        }
+    } else {
+        for (const [key, value] of Object.entries(parsedStats)) {
+            if (!['stats', 'status', 'inventory', 'quests'].includes(key) && value !== undefined) {
+                normalized[key] = cloneSerializable(value);
+            }
+        }
+    }
+
+    if (isPlainObject(parsedStats.status)) {
+        for (const [key, value] of Object.entries(parsedStats.status)) {
+            if (value !== undefined) {
+                normalized[key] = cloneSerializable(value);
+            }
+        }
+    }
+
+    if (parsedStats.inventory !== undefined) {
+        normalized.inventory = normalizeInventoryValue(parsedStats.inventory);
+    }
+
+    for (const [key, defaultValue] of Object.entries(DEFAULT_USER_STATS)) {
+        if (typeof defaultValue !== 'number') continue;
+
+        const numericValue = Number(normalized[key]);
+        normalized[key] = Number.isFinite(numericValue) ? numericValue : defaultValue;
+    }
+
+    return mergeWithDefaults(DEFAULT_USER_STATS, normalized);
+}
+
+function normalizeQuestValue(quest) {
+    let value = quest;
+    while (isPlainObject(value) && value.value !== undefined) {
+        value = value.value;
+    }
+
+    if (typeof value === 'string') {
+        return value.trim() || 'None';
+    }
+
+    if (isPlainObject(value)) {
+        return value.title || value.description || JSON.stringify(value);
+    }
+
+    return value == null ? 'None' : String(value);
+}
+
+function normalizeQuestsValue(quests) {
+    if (!isPlainObject(quests)) {
+        return { main: 'None', optional: [] };
+    }
+
+    const optionalSource = Array.isArray(quests.optional)
+        ? quests.optional
+        : (Array.isArray(quests.active) ? quests.active : []);
+
+    return {
+        main: normalizeQuestValue(quests.main),
+        optional: optionalSource
+            .map(normalizeQuestValue)
+            .filter(quest => quest && quest !== 'None')
+    };
+}
+
+function normalizeSettings(savedSettings) {
+    const sourceSettings = isPlainObject(savedSettings) ? savedSettings : {};
+    const normalized = mergeWithDefaults(DEFAULT_EXTENSION_SETTINGS, sourceSettings);
+    const savedVersion = Number(sourceSettings.settingsVersion);
+    normalized.settingsVersion = Number.isFinite(savedVersion) && savedVersion > 0 ? savedVersion : 1;
+    normalized.userStats = normalizeUserStatsValue(sourceSettings.userStats);
+
+    const parsedUserStats = parseMaybeJSON(sourceSettings.userStats);
+    if (sourceSettings.quests !== undefined) {
+        normalized.quests = normalizeQuestsValue(sourceSettings.quests);
+    } else if (isPlainObject(parsedUserStats) && parsedUserStats.quests !== undefined) {
+        normalized.quests = normalizeQuestsValue(parsedUserStats.quests);
+    }
+
+    return {
+        settings: normalized,
+        changed: JSON.stringify(normalized) !== JSON.stringify(savedSettings)
+    };
+}
+
+function isChatDataSaveReady() {
+    return !!(
+        chat_metadata
+        && typeof chat_metadata === 'object'
+        && chat_metadata.integrity
+        && getCurrentChatId()
+    );
+}
 
 function hasTrackerPayload(payload) {
     return !!(payload && typeof payload === 'object' && (
@@ -273,7 +512,8 @@ function validateSettings(settings) {
     // Check for required top-level properties
     if (typeof settings.enabled !== 'boolean' ||
         typeof settings.autoUpdate !== 'boolean' ||
-        !settings.userStats || typeof settings.userStats !== 'object') {
+        !settings.userStats || typeof settings.userStats !== 'object' ||
+        Array.isArray(settings.userStats)) {
         console.warn('[RPG Companion] Settings validation failed: missing required properties');
         return false;
     }
@@ -282,7 +522,8 @@ function validateSettings(settings) {
     const stats = settings.userStats;
     if (typeof stats.health !== 'number' ||
         typeof stats.satiety !== 'number' ||
-        typeof stats.energy !== 'number') {
+        typeof stats.energy !== 'number' ||
+        !stats.inventory || typeof stats.inventory !== 'object') {
         console.warn('[RPG Companion] Settings validation failed: invalid userStats structure');
         return false;
     }
@@ -307,21 +548,23 @@ export function loadSettings() {
 
         if (extension_settings[extensionName]) {
             const savedSettings = extension_settings[extensionName];
+            const normalizedResult = normalizeSettings(savedSettings);
+            const normalizedSettings = normalizedResult.settings;
 
-            // Validate loaded settings
-            if (!validateSettings(savedSettings)) {
+            // Validate loaded settings after schema repair/normalization
+            if (!validateSettings(normalizedSettings)) {
                 console.warn('[RPG Companion] Loaded settings failed validation, using defaults');
-                console.warn('[RPG Companion] Invalid settings:', savedSettings);
+                console.warn('[RPG Companion] Invalid settings:', normalizedSettings);
                 // Save valid defaults to replace corrupt data
                 saveSettings();
                 return;
             }
 
-            updateExtensionSettings(savedSettings);
+            updateExtensionSettings(normalizedSettings);
 
             // Perform settings migrations based on version
             const currentVersion = extensionSettings.settingsVersion || 1;
-            let settingsChanged = false;
+            let settingsChanged = normalizedResult.changed;
 
             // Migration to version 2: Enable dynamic weather for existing users
             if (currentVersion < 2) {
@@ -455,7 +698,8 @@ export function saveSettings() {
  * Saves RPG data to the current chat's metadata.
  */
 export function saveChatData() {
-    if (!chat_metadata) {
+    if (!isChatDataSaveReady()) {
+        hasDeferredChatDataSave = true;
         return;
     }
 
@@ -478,6 +722,16 @@ export function saveChatData() {
     };
 
     saveChatDebounced();
+}
+
+export function flushDeferredChatDataSave() {
+    if (!hasDeferredChatDataSave || !isChatDataSaveReady()) {
+        return false;
+    }
+
+    hasDeferredChatDataSave = false;
+    saveChatData();
+    return true;
 }
 
 /**
@@ -711,6 +965,7 @@ export function loadChatData() {
                 inventory: {
                     version: 2,
                     onPerson: "None",
+                    clothing: "None",
                     stored: {},
                     assets: "None"
                 }
@@ -830,6 +1085,7 @@ function validateInventoryStructure(inventory, source) {
         extensionSettings.userStats.inventory = {
             version: 2,
             onPerson: "None",
+            clothing: "None",
             stored: {},
             assets: "None"
         };
@@ -857,6 +1113,20 @@ function validateInventoryStructure(inventory, source) {
         if (cleanedOnPerson !== inventory.onPerson) {
             console.warn(`[RPG Companion] Cleaned corrupted items from onPerson inventory (${source})`);
             inventory.onPerson = cleanedOnPerson;
+            needsSave = true;
+        }
+    }
+
+    // Validate clothing field
+    if (typeof inventory.clothing !== 'string') {
+        console.warn(`[RPG Companion] Invalid clothing from ${source}, resetting to "None"`);
+        inventory.clothing = "None";
+        needsSave = true;
+    } else {
+        const cleanedClothing = cleanItemString(inventory.clothing);
+        if (cleanedClothing !== inventory.clothing) {
+            console.warn(`[RPG Companion] Cleaned corrupted items from clothing inventory (${source})`);
+            inventory.clothing = cleanedClothing;
             needsSave = true;
         }
     }
@@ -1559,4 +1829,3 @@ export function importPresets(importData, overwrite = false) {
 
     return importCount;
 }
-

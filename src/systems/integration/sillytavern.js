@@ -33,7 +33,8 @@ import {
     setMessageSwipeTrackerData,
     getSwipeData,
     commitTrackerDataFromPriorMessage,
-    inheritSwipeDataFromPriorMessage
+    inheritSwipeDataFromPriorMessage,
+    flushDeferredChatDataSave
 } from '../../core/persistence.js';
 import { i18n } from '../../core/i18n.js';
 
@@ -389,6 +390,7 @@ export function onChatLoaded() {
     restoreOrRepairLatestTrackerState();
     maybeRehydrateUserStatsFromDisplayData();
     rerenderRpgState();
+    flushDeferredChatDataSave();
     scheduleChatStateRehydration();
     updateAllCheckpointIndicators();
 }
@@ -658,6 +660,7 @@ export function onCharacterChanged() {
 
     // Load chat-specific data when switching chats
     loadChatData();
+    flushDeferredChatDataSave();
 
     // chat_metadata may not reflect the actual chat tail for branches, so
     // loadChatData() may have just restored stale data from the parent chat.

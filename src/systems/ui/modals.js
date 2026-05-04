@@ -613,6 +613,28 @@ export function showWelcomeModalIfNeeded() {
 }
 
 /**
+ * Shows the deprecation notice once for users updating to the deprecation release.
+ * @returns {boolean} True when the modal was displayed.
+ */
+export function showDeprecationModalIfNeeded() {
+    const DEPRECATION_NOTICE_VERSION = '3.7.4';
+    const STORAGE_KEY = 'rpg_companion_deprecation_notice_seen';
+
+    try {
+        const seenVersion = localStorage.getItem(STORAGE_KEY);
+
+        if (seenVersion !== DEPRECATION_NOTICE_VERSION) {
+            showDeprecationModal(DEPRECATION_NOTICE_VERSION, STORAGE_KEY);
+            return true;
+        }
+    } catch (error) {
+        console.error('[RPG Companion] Failed to check deprecation modal status:', error);
+    }
+
+    return false;
+}
+
+/**
  * Shows the welcome modal
  * @param {string} version - The version to mark as seen
  * @param {string} storageKey - The localStorage key to use
@@ -657,6 +679,47 @@ function showWelcomeModal(version, storageKey) {
     gotItBtn?.addEventListener('click', closeModal, { once: true });
 
     // Close on background click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeModal();
+        }
+    }, { once: true });
+}
+
+function showDeprecationModal(version, storageKey) {
+    const modal = document.getElementById('rpg-deprecation-modal');
+    if (!modal) {
+        console.error('[RPG Companion] Deprecation modal element not found');
+        return;
+    }
+
+    const theme = extensionSettings.theme || 'default';
+    modal.setAttribute('data-theme', theme);
+
+    modal.style.display = 'flex';
+    modal.classList.add('is-open');
+
+    const closeBtn = document.getElementById('rpg-deprecation-close');
+    const gotItBtn = document.getElementById('rpg-deprecation-got-it');
+
+    const closeModal = () => {
+        modal.classList.add('is-closing');
+
+        setTimeout(() => {
+            modal.style.display = 'none';
+            modal.classList.remove('is-open', 'is-closing');
+        }, 200);
+
+        try {
+            localStorage.setItem(storageKey, version);
+        } catch (error) {
+            console.error('[RPG Companion] Failed to save deprecation modal status:', error);
+        }
+    };
+
+    closeBtn?.addEventListener('click', closeModal, { once: true });
+    gotItBtn?.addEventListener('click', closeModal, { once: true });
+
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             closeModal();

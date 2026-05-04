@@ -212,6 +212,42 @@
     </div>
 </div>
 
+<!-- Deprecation Notice Modal -->
+<div id="rpg-deprecation-modal" class="rpg-settings-popup" role="dialog" aria-modal="true"
+    aria-labelledby="rpg-deprecation-title" style="display: none;">
+    <div class="rpg-settings-popup-content" style="max-width: 640px;">
+        <header class="rpg-settings-popup-header">
+            <h3 id="rpg-deprecation-title">
+                <i class="fa-solid fa-circle-info"></i>
+                <span data-i18n-key="deprecation.title">RPG Companion becomes deprecated!</span>
+            </h3>
+            <button id="rpg-deprecation-close" class="rpg-popup-close" type="button"
+                aria-label="Close Deprecation Notice">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </header>
+        <div class="rpg-settings-popup-body" style="max-height: 520px; overflow-y: auto; padding: 20px;">
+            <p data-i18n-key="deprecation.body.support">Thank you all for the continuous support. The extension will continue to function in its current state and will receive occasional bug fixes/features if provided by the community members. However, I (Marinara) won't be actively developing it further.</p>
+
+            <p>Why? The reason is simple, <strong data-i18n-key="deprecation.body.reasonEmphasis">I am no longer using SillyTavern as a frontend, and have instead moved on to develop my own frontend called MarinaraEngine.</strong> It's free, open-source, and plug-and-play, centered around utilizing agents, and already has all the RPG Companion's features built in and comes with a multitude of other, custom features (such as different chat modes, for Discord-styled conversations, classic Roleplay, and a brand new game mode that offers you an RPG with VN-style visuals).</p>
+
+            <p data-i18n-key="deprecation.linkIntro">If you're interested, check it out here:</p>
+            <p>
+                <a href="https://github.com/Pasta-Devs/Marinara-Engine" target="_blank" rel="noopener noreferrer" class="menu_button" style="display: inline-block;">
+                    <i class="fa-brands fa-github"></i> MarinaraEngine
+                </a>
+            </p>
+
+            <p style="margin-top: 24px;"><strong><em data-i18n-key="deprecation.signoff">Cheers and happy gooning!</em></strong></p>
+        </div>
+        <footer class="rpg-settings-popup-footer">
+            <button id="rpg-deprecation-got-it" class="rpg-btn-primary" type="button" style="width: 100%;">
+                <i class="fa-solid fa-check"></i> <span data-i18n-key="global.gotIt">Got it!</span>
+            </button>
+        </footer>
+    </div>
+</div>
+
 <!-- Settings Modal -->
 <div id="rpg-settings-popup" class="rpg-settings-popup" role="dialog" aria-modal="true"
     aria-labelledby="rpg-settings-title">
