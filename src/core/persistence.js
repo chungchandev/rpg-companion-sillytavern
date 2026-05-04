@@ -557,6 +557,38 @@ export function getSwipeData(message, swipeId) {
 }
 
 /**
+ * Resolve active swipe index for a message.
+ * Falls back to message.swipe_id, but prefers exact match against current
+ * message text when available to avoid stale swipe_id during event timing races.
+ *
+ * @param {Object} message - Assistant message object
+ * @returns {number} Active swipe index
+ */
+function resolveActiveSwipeId(message) {
+    const fallbackSwipeId = Number(message?.swipe_id ?? 0);
+    const swipes = Array.isArray(message?.swipes) ? message.swipes : null;
+
+    if (!swipes || swipes.length === 0) {
+        return Math.max(0, fallbackSwipeId);
+    }
+
+    const currentText = typeof message?.mes === 'string' ? message.mes : '';
+    if (currentText) {
+        for (let i = swipes.length - 1; i >= 0; i--) {
+            if (typeof swipes[i] === 'string' && swipes[i] === currentText) {
+                return i;
+            }
+        }
+    }
+
+    if (fallbackSwipeId < 0) {
+        return 0;
+    }
+
+    return Math.min(fallbackSwipeId, swipes.length - 1);
+}
+
+/**
  * Commits tracker data from the assistant message immediately before currentMessageIndex.
  * Walks backward through the chat skipping the current message, user messages, and system
  * messages until it finds the prior assistant message, then loads its active swipe data.
@@ -574,25 +606,30 @@ export function commitTrackerDataFromPriorMessage(currentMessageIndex) {
         return;
     }
 
-    // console.log('[RPG Companion] commitTrackerDataFromPriorMessage called with index', currentMessageIndex, '| chat.length =', chat.length);
 
     for (let i = currentMessageIndex - 1; i >= 0; i--) {
         const message = chat[i];
         if (message.is_user || message.is_system) continue;
 
         // Found the prior assistant message — commit its active swipe data
-        const swipeId = message.swipe_id || 0;
+        const swipeId = resolveActiveSwipeId(message);
         const swipeData = getSwipeData(message, swipeId);
-        // console.log('[RPG Companion] Committing from chat[' + i + '] swipe', swipeId, '| has swipe data:', !!swipeData);
-        committedTrackerData.userStats = swipeData?.userStats || null;
-        committedTrackerData.infoBox = swipeData?.infoBox || null;
-        const rawCharacterThoughts = swipeData?.characterThoughts;
+
+        if (!swipeData) {
+            // Keep searching backward for a valid state if this assistant message has no data
+            continue;
+        }
+
+        committedTrackerData.userStats = swipeData.userStats || null;
+        committedTrackerData.infoBox = swipeData.infoBox || null;
+        const rawCharacterThoughts = swipeData.characterThoughts;
         committedTrackerData.characterThoughts =
             rawCharacterThoughts == null
                 ? null
                 : (typeof rawCharacterThoughts === 'string'
                     ? rawCharacterThoughts
                     : JSON.stringify(rawCharacterThoughts));
+
         return;
     }
 
@@ -631,7 +668,7 @@ export function inheritSwipeDataFromPriorMessage(message, messageIndex) {
         const msg = chat[i];
         if (msg.is_user || msg.is_system) continue;
 
-        const swipeId = msg.swipe_id || 0;
+        const swipeId = resolveActiveSwipeId(msg);
         const swipeData = getSwipeData(msg, swipeId);
         if (!swipeData) continue; // No data on this assistant message; keep searching further back
 
