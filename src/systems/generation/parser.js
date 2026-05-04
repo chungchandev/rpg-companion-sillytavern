@@ -7,7 +7,43 @@
 import { extensionSettings, FEATURE_FLAGS, addDebugLog } from '../../core/state.js';
 import { saveSettings } from '../../core/persistence.js';
 import { extractInventory } from './inventoryParser.js';
-import { repairJSON } from '../../utils/jsonRepair.js';
+import { repairJSON, extractJSONFromText } from '../../utils/jsonRepair.js';
+
+/**
+ * Unwraps common envelope keys models may use around tracker payloads.
+ * Keeps extraction resilient when output is nested under wrappers like "trackers".
+ *
+ * @param {object} payload - Parsed JSON payload
+ * @returns {object} Unwrapped payload (or original when no wrapper exists)
+ */
+function unwrapTrackerEnvelope(payload) {
+    let current = payload;
+
+    for (let depth = 0; depth < 4; depth++) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) {
+            return payload;
+        }
+
+        if (
+            current.userStats ||
+            current.infoBox ||
+            current.characters ||
+            current.characterThoughts ||
+            current.presentCharacters
+        ) {
+            return current;
+        }
+
+        const next = current.trackers || current.tracker || current.context || current.state || null;
+        if (!next || typeof next !== 'object') {
+            break;
+        }
+
+        current = next;
+    }
+
+    return payload;
+}
 
 /**
  * Extracts the base name (before parentheses) and converts to snake_case for use as JSON key.
@@ -155,9 +191,12 @@ function debugLog(message, data = null) {
  * Handles both separate code blocks and combined code blocks gracefully.
  *
  * @param {string} responseText - The raw AI response text
+ * @param {Object} [options] - Parser behavior options
+ * @param {boolean} [options.suppressNoDataError=false] - Avoid console error when no tracker data is found
  * @returns {{userStats: string|null, infoBox: string|null, characterThoughts: string|null}} Parsed tracker data
  */
-export function parseResponse(responseText) {
+export function parseResponse(responseText, options = {}) {
+    const { suppressNoDataError = false } = options;
     const result = {
         userStats: null,
         infoBox: null,
@@ -233,19 +272,21 @@ export function parseResponse(responseText) {
         let foundUnified = false;
         for (let idx = 0; idx < extractedObjects.length; idx++) {
             const parsed = repairJSON(extractedObjects[idx]);
-            if (parsed && (parsed.userStats || parsed.infoBox || parsed.characters)) {
+            const unwrapped = parsed ? unwrapTrackerEnvelope(parsed) : null;
+            if (unwrapped && (unwrapped.userStats || unwrapped.infoBox || unwrapped.characters || unwrapped.characterThoughts || unwrapped.presentCharacters)) {
                 // console.log('[RPG Parser] ✓ Detected unified JSON structure (v3.1 format)');
 
-                if (parsed.userStats) {
-                    result.userStats = JSON.stringify(parsed.userStats);
+                if (unwrapped.userStats) {
+                    result.userStats = JSON.stringify(unwrapped.userStats);
                     // console.log('[RPG Parser] ✓ Extracted userStats from unified structure');
                 }
-                if (parsed.infoBox) {
-                    result.infoBox = JSON.stringify(parsed.infoBox);
+                if (unwrapped.infoBox) {
+                    result.infoBox = JSON.stringify(unwrapped.infoBox);
                     // console.log('[RPG Parser] ✓ Extracted infoBox from unified structure');
                 }
-                if (parsed.characters) {
-                    result.characterThoughts = JSON.stringify(parsed.characters);
+                const unifiedCharacters = unwrapped.characters || unwrapped.presentCharacters || unwrapped.characterThoughts;
+                if (unifiedCharacters) {
+                    result.characterThoughts = JSON.stringify(unifiedCharacters);
                     // console.log('[RPG Parser] ✓ Extracted characters from unified structure');
                 }
 
@@ -270,11 +311,12 @@ export function parseResponse(responseText) {
             const parsed = repairJSON(jsonContent);
 
             if (parsed) {
+                const normalizedParsed = unwrapTrackerEnvelope(parsed);
                 // console.log(`[RPG Parser] Object ${idx + 1} parsed successfully, keys:`, Object.keys(parsed));
 
                 // Check if object is wrapped (e.g., {"userStats": {...}})
                 // Unwrap single-key objects that match our tracker types
-                let unwrapped = parsed;
+                let unwrapped = normalizedParsed;
                 if (Object.keys(parsed).length === 1) {
                     const key = Object.keys(parsed)[0];
                     if (key === 'userStats' || key === 'infoBox' || key === 'characters') {
@@ -285,15 +327,16 @@ export function parseResponse(responseText) {
 
                 // Check for unified structure format (even if previous detection missed it)
                 // This handles the prompt-requested format: {"userStats": {...}, "infoBox": {...}, "characters": [...]}
-                if (parsed.userStats || parsed.infoBox || parsed.characters) {
-                    if (parsed.userStats) {
-                        result.userStats = JSON.stringify(parsed.userStats);
+                if (normalizedParsed.userStats || normalizedParsed.infoBox || normalizedParsed.characters || normalizedParsed.characterThoughts || normalizedParsed.presentCharacters) {
+                    if (normalizedParsed.userStats) {
+                        result.userStats = JSON.stringify(normalizedParsed.userStats);
                     }
-                    if (parsed.infoBox) {
-                        result.infoBox = JSON.stringify(parsed.infoBox);
+                    if (normalizedParsed.infoBox) {
+                        result.infoBox = JSON.stringify(normalizedParsed.infoBox);
                     }
-                    if (parsed.characters) {
-                        result.characterThoughts = JSON.stringify(parsed.characters);
+                    const normalizedCharacters = normalizedParsed.characters || normalizedParsed.presentCharacters || normalizedParsed.characterThoughts;
+                    if (normalizedCharacters) {
+                        result.characterThoughts = JSON.stringify(normalizedCharacters);
                     }
                     continue; // Skip further classification
                 }
@@ -352,18 +395,30 @@ export function parseResponse(responseText) {
             const parsed = repairJSON(jsonContent);
 
             if (parsed) {
+                const normalizedParsed = unwrapTrackerEnvelope(parsed);
                 // console.log(`[RPG Parser] JSON block ${idx + 1} parsed successfully, keys:`, Object.keys(parsed));
 
                 // Detect tracker type by checking for top-level fields
-                if (parsed.stats || parsed.status || parsed.skills || parsed.inventory || parsed.quests) {
+                if (normalizedParsed.userStats || normalizedParsed.infoBox || normalizedParsed.characters || normalizedParsed.characterThoughts || normalizedParsed.presentCharacters) {
+                    if (normalizedParsed.userStats) {
+                        result.userStats = JSON.stringify(normalizedParsed.userStats);
+                    }
+                    if (normalizedParsed.infoBox) {
+                        result.infoBox = JSON.stringify(normalizedParsed.infoBox);
+                    }
+                    const normalizedCharacters = normalizedParsed.characters || normalizedParsed.presentCharacters || normalizedParsed.characterThoughts;
+                    if (normalizedCharacters) {
+                        result.characterThoughts = JSON.stringify(normalizedCharacters);
+                    }
+                } else if (normalizedParsed.stats || normalizedParsed.status || normalizedParsed.skills || normalizedParsed.inventory || normalizedParsed.quests) {
                     result.userStats = jsonContent;
                     // console.log('[RPG Parser] ✓ Assigned to User Stats');
                     debugLog('[RPG Parser] ✓ Extracted JSON User Stats');
-                } else if (parsed.date || parsed.location || parsed.weather || parsed.temperature || parsed.time) {
+                } else if (normalizedParsed.date || normalizedParsed.location || normalizedParsed.weather || normalizedParsed.temperature || normalizedParsed.time) {
                     result.infoBox = jsonContent;
                     // console.log('[RPG Parser] ✓ Assigned to Info Box');
                     debugLog('[RPG Parser] ✓ Extracted JSON Info Box');
-                } else if (parsed.characters || Array.isArray(parsed)) {
+                } else if (normalizedParsed.characters || normalizedParsed.presentCharacters || normalizedParsed.characterThoughts || Array.isArray(normalizedParsed)) {
                     result.characterThoughts = jsonContent;
                     // console.log('[RPG Parser] ✓ Assigned to Characters');
                     debugLog('[RPG Parser] ✓ Extracted JSON Characters');
@@ -543,10 +598,47 @@ export function parseResponse(responseText) {
     debugLog('[RPG Parser] Found Characters:', !!result.characterThoughts);
     debugLog('[RPG Parser] =======================================================');
 
+    // Final fallback: try to extract tracker JSON from any fenced block content
+    // This catches responses where JSON is embedded in non-standard markdown structure.
+    if (!result.userStats && !result.infoBox && !result.characterThoughts) {
+        const fencedRegex = /```(?:json)?\s*\n?([\s\S]*?)```/gi;
+        const fencedMatches = [...cleanedResponse.matchAll(fencedRegex)];
+
+        for (const match of fencedMatches) {
+            const fencedContent = (match[1] || '').trim();
+            if (!fencedContent) continue;
+
+            const extracted = extractJSONFromText(fencedContent) || fencedContent;
+            const parsed = repairJSON(extracted);
+            const normalizedParsed = parsed ? unwrapTrackerEnvelope(parsed) : null;
+            if (!normalizedParsed) continue;
+
+            if (normalizedParsed.userStats && !result.userStats) {
+                result.userStats = JSON.stringify(normalizedParsed.userStats);
+            }
+            if (normalizedParsed.infoBox && !result.infoBox) {
+                result.infoBox = JSON.stringify(normalizedParsed.infoBox);
+            }
+            const normalizedCharacters = normalizedParsed.characters || normalizedParsed.presentCharacters || normalizedParsed.characterThoughts;
+            if (normalizedCharacters && !result.characterThoughts) {
+                result.characterThoughts = JSON.stringify(normalizedCharacters);
+            }
+
+            if (result.userStats || result.infoBox || result.characterThoughts) {
+                debugLog('[RPG Parser] ✓ Extracted trackers from final fenced-block fallback');
+                break;
+            }
+        }
+    }
+
     // Check if we found at least one section - if not, mark as parsing failure
     if (!result.userStats && !result.infoBox && !result.characterThoughts) {
         result.parsingFailed = true;
-        console.error('[RPG Parser] ❌ No tracker data found in response - parsing failed');
+        if (!suppressNoDataError) {
+            console.error('[RPG Parser] ❌ No tracker data found in response - parsing failed');
+        } else {
+            debugLog('[RPG Parser] No tracker data found (suppressed no-data error)');
+        }
     }
 
     return result;

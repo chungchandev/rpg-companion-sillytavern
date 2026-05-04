@@ -280,7 +280,7 @@ function repairLatestTrackerStateFromCurrentSwipeContent(chatMessages = getConte
             continue;
         }
 
-        const parsedData = parseResponse(currentSwipeText);
+        const parsedData = parseResponse(currentSwipeText, { suppressNoDataError: true });
         if (parsedData.userStats) {
             parsedData.userStats = removeLocks(parsedData.userStats);
         }
@@ -468,7 +468,7 @@ export async function onMessageReceived(data) {
         if (lastMessage && !lastMessage.is_user) {
             const rawSwipeId = Number(lastMessage.swipe_id ?? 0);
             const responseText = lastMessage.mes;
-            const parsedData = parseResponse(responseText);
+            const parsedData = parseResponse(responseText, { suppressNoDataError: true });
 
             // Note: Don't show parsing error here - this event fires when loading chat history too
             // Error notification is handled in apiClient.js for fresh generations only
