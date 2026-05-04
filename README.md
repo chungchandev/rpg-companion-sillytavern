@@ -7,12 +7,11 @@ An immersive RPG extension for browsers that tracks character stats, scene infor
 
 ## 🆕 What's New
 
-### v3.7.2
- 
-- Minor bug fixes
+### DEPRECATED
 
-**Special thanks to all the other contributors for this project:**
-Paperboygold, Munimunigamer, Subarashimo, Lilminzyu, Claude, IDeathByte, Chungchandev, Joenunezb, Amauragis, Tomt610, and Jakstein!
+Moving on to developing the Marinara Engine frontend, the extension will now be maintained by the community!
+
+https://github.com/Pasta-Devs/Marinara-Engine
 
 ## 📥 Installation
 
